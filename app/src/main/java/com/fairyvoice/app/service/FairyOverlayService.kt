@@ -332,6 +332,8 @@ class FairyOverlayService : Service() {
             .setContentText(getString(R.string.notification_text))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pi)
+            // M4-1.3.4：与 ConnectionService 前台通知同组折叠（非汇总），避免两条常驻通知
+            .setGroup("fairy_voice_service")
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

@@ -86,6 +86,9 @@ class ConnectionService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pi)
             .addAction(0, getString(R.string.notification_action_wake), wakePi)
+            // M4-1.3.4：与 FairyOverlayService 前台通知同组折叠，避免通知栏出现两条常驻通知
+            .setGroup("fairy_voice_service")
+            .setGroupSummary(true)
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
