@@ -36,6 +36,7 @@ import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.protocol.FairyVoiceException
 import com.fairyvoice.app.service.ConnectionService
 import com.fairyvoice.app.service.FairyOverlayService
+import com.fairyvoice.app.util.LogFile
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.FairyVoiceTileService
 import com.fairyvoice.app.wake.WakeTrigger
@@ -149,6 +150,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnAddTile).setOnClickListener { onAddTileClick() }
         btnRecordTest.setOnClickListener { onRecordTestClick() }
         btnShareRecord.setOnClickListener { onShareRecordClick() }
+        findViewById<Button>(R.id.btnShareLog).setOnClickListener { onShareLogClick() }
 
         // M4-1.3：胶囊形态选择（悬浮窗 / 流体云 / 智能），修改即存
         rgOverlayMode.setOnCheckedChangeListener { _, checkedId ->
@@ -170,6 +172,7 @@ class MainActivity : AppCompatActivity() {
         // post 到主线程（onResume 后执行），确保 Activity 已前台，FGS 启动合法。
         statusHandler.post { autoConnectIfNeeded() }
 
+        LogFile.d("Main.onCreate action=${intent?.action}")
         // M4-1.3.6：冷启动唤醒（磁贴/通知栏/音量键拉起）挂起，窗口就绪后触发，
         // 500ms 延迟兜底（onCreate 阶段 requestPermissions 在 ColorOS 上弹窗会被吞）。
         if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
@@ -179,6 +182,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        LogFile.d("Main.onResume focus=${hasWindowFocus()}")
         statusHandler.removeCallbacks(statusPoll)
         statusHandler.post(statusPoll)
         refreshStatus()
@@ -189,6 +193,7 @@ class MainActivity : AppCompatActivity() {
     /** M4-1.3.6：窗口就绪（获焦）即提前执行待处理唤醒，保证权限弹窗能正常显示。 */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        LogFile.d("Main.focus hasFocus=$hasFocus")
         if (hasFocus) fireWakeNow()
     }
 
@@ -209,6 +214,7 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         intent?.addFlags(0x08000000 /* FLAG_EXCLUDE_FROM_RECENTS */)
+        LogFile.d("Main.onNewIntent action=${intent?.action} focus=${hasWindowFocus()}")
         if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
             // M4-1.3.6：可见时立即触发；不可见（后台复用）挂起等窗口就绪
             if (hasWindowFocus()) handleWake() else scheduleWake()
@@ -221,6 +227,7 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        LogFile.d("Main.permResult code=$requestCode granted=${grantResults.firstOrNull()}")
         if (requestCode == RC_RECORD_AUDIO) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 if (pendingWake) {
@@ -238,14 +245,17 @@ class MainActivity : AppCompatActivity() {
 
     /** M4-1.2：唤醒 = 权限已授直接走悬浮窗链路；未授请求授权后继续。 */
     private fun handleWake() {
+        LogFile.d("Main.handleWake")
         requestRecordPermissionAndToggle(wake = true)
     }
 
     /** M4-1.3.6：挂起唤醒任务（窗口未就绪时先等，500ms 后兜底执行）。 */
     private fun scheduleWake() {
+        LogFile.d("Main.scheduleWake")
         wakeTask?.let { statusHandler.removeCallbacks(it) }
         wakeTask = Runnable {
             wakeTask = null
+            LogFile.d("Main.wakeTask.fire")
             handleWake()
         }
         statusHandler.postDelayed(wakeTask!!, WAKE_DELAY_MS)
@@ -254,6 +264,7 @@ class MainActivity : AppCompatActivity() {
     /** M4-1.3.6：窗口就绪（获焦/onResume）时提前执行待处理唤醒。 */
     private fun fireWakeNow() {
         if (wakeTask != null) {
+            LogFile.d("Main.fireWakeNow")
             wakeTask?.let { statusHandler.removeCallbacks(it) }
             wakeTask = null
             handleWake()
@@ -355,6 +366,23 @@ class MainActivity : AppCompatActivity() {
         requestRecordPermissionAndToggle(wake = false)
     }
 
+    /** M4-1.3.7：导出诊断日志（filesDir/logs/fairy_log.txt）。 */
+    private fun onShareLogClick() {
+        val file = File(filesDir, "logs/fairy_log.txt")
+        if (!file.exists() || file.length() == 0L) {
+            Toast.makeText(this, getString(R.string.share_log_empty), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.share_log_title))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.share_log_title)))
+    }
+
     /** M4-1.1：分享最近一次录音（FileProvider 授权 URI，系统分享面板导出）。 */
     private fun onShareRecordClick() {
         val file = lastRecordedFile
@@ -377,9 +405,11 @@ class MainActivity : AppCompatActivity() {
      * M4-1.3.2：startWake 兜底 try/catch，FGS 启动异常不崩主线程。
      */
     private fun requestRecordPermissionAndToggle(wake: Boolean) {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            == PackageManager.PERMISSION_GRANTED
-        ) {
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        LogFile.d("Main.reqRecord wake=$wake granted=$granted")
+        if (granted) {
             if (wake) startWakeSafely() else VoiceController.toggle(this)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             pendingWake = wake

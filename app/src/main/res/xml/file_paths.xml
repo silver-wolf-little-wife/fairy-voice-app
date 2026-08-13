@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FileProvider 暴露路径白名单：仅录音目录（应用私有 filesDir/recordings） -->
+<!-- FileProvider 暴露路径白名单（仅应用私有 filesDir 下的子目录） -->
 <paths>
+    <!-- 录音目录：录音测试/唤醒录音文件，供「分享录音」导出 -->
     <files-path name="recordings" path="recordings/" />
+    <!-- 诊断日志：fairy_log.txt，供「导出诊断日志」/ adb pull 定位问题 -->
+    <files-path name="logs" path="logs/" />
 </paths>

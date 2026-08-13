@@ -24,6 +24,7 @@ import java.io.IOException
 import java.io.RandomAccessFile
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.fairyvoice.app.util.LogFile
 import java.util.concurrent.atomic.AtomicBoolean
 
 class AudioRecorder(
@@ -94,10 +95,12 @@ class AudioRecorder(
             return
         }
         if (record.state != AudioRecord.STATE_INITIALIZED) {
+            LogFile.e("AudioRec.init failed sr=$sampleRate")
             record.release()
             fail(cb, IllegalStateException("AudioRecord init failed"))
             return
         }
+        LogFile.d("AudioRec.start sr=$sampleRate buf=$bufSize")
         cb.onStart()
 
         // M4-1.3 静音检测状态：50ms/帧 @16kHz（提前到 try 外，收尾回调需要读取）
@@ -154,6 +157,7 @@ class AudioRecorder(
 
     private fun fail(cb: Callback, e: Exception) {
         running.set(false)
+        LogFile.e("AudioRec.fail ${e.message}")
         cb.onError(e)
     }
 

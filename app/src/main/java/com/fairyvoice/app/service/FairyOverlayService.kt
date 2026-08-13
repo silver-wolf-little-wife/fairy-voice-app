@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * M4-1.2 悬浮窗 / 流体云前台服务。
  *
@@ -48,6 +48,7 @@ import androidx.core.content.ContextCompat
 import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.R
 import com.fairyvoice.app.audio.VoiceController
+import com.fairyvoice.app.util.LogFile
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.WakeTrigger
 import java.io.File
@@ -74,6 +75,7 @@ class FairyOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        LogFile.d("Overlay.onCreate")
         // M4-1.3.3：启动即清理上次残留的流体云通知（服务被系统重启后无人 cancel 会滞留）
         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
         ensureChannels()
@@ -82,6 +84,7 @@ class FairyOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        LogFile.d("Overlay.onStartCommand action=${intent?.action}")
         when (intent?.action) {
             WakeTrigger.ACTION_FAIRY_OVERLAY_WAKE -> handleWake()
             ACTION_HIDE -> hideAll()
@@ -119,9 +122,11 @@ class FairyOverlayService : Service() {
     // ---------- 唤醒 / 隐藏 ----------
 
     private fun handleWake() {
-        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+        val granted = ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        LogFile.d("Overlay.handleWake perm=$granted")
+        if (!granted) {
             // 权限缺失（正常由 WakeTrigger 拦在前）：拉起授权页
             startActivity(WakeTrigger.wakeIntent(this))
             return
@@ -147,6 +152,7 @@ class FairyOverlayService : Service() {
     private val voiceListener = object : VoiceController.Listener {
         override fun onStateChanged(state: VoiceController.State) {
             uiHandler.post {
+                LogFile.d("Overlay.state $state")
                 val text = when (state) {
                     VoiceController.State.RECORDING -> getString(R.string.overlay_recording)
                     VoiceController.State.RECOGNIZING -> getString(R.string.overlay_recognizing)
@@ -171,6 +177,7 @@ class FairyOverlayService : Service() {
 
         override fun onReply(text: String) {
             uiHandler.post {
+                LogFile.d("Overlay.onReply len=${text.length}")
                 lastReply = text
                 showCard(text)
                 if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_reply_title), text)
@@ -180,6 +187,7 @@ class FairyOverlayService : Service() {
 
         override fun onError(e: Exception) {
             uiHandler.post {
+                LogFile.e("Overlay.onError ${e.message}")
                 showCard("${getString(R.string.overlay_error)}：${e.message}")
                 if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_error), e.message)
                 scheduleHide(ERROR_SHOW_MS)

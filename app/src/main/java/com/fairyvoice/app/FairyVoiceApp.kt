@@ -17,8 +17,15 @@ import java.util.Locale
 
 class FairyVoiceApp : Application() {
 
+    companion object {
+        @Volatile
+        lateinit var instance: FairyVoiceApp
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
                 val sw = StringWriter()

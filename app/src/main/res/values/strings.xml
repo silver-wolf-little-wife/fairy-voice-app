@@ -22,6 +22,10 @@
     <string name="btn_share_record">分享录音</string>
     <string name="share_record_title">分享录音文件</string>
     <string name="share_record_empty">还没有可分享的录音</string>
+    <!-- M4-1.3.7：诊断日志导出 -->
+    <string name="btn_share_log">导出诊断日志</string>
+    <string name="share_log_title">分享诊断日志</string>
+    <string name="share_log_empty">还没有诊断日志</string>
     <string name="voice_state_idle">空闲</string>
     <string name="voice_state_recording">录音中…</string>
     <string name="voice_state_recognizing">识别中…</string>

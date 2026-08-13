@@ -23,6 +23,7 @@ import com.fairyvoice.app.FairyClientHolder
 import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.service.FairyOverlayService
+import com.fairyvoice.app.util.LogFile
 import com.fairyvoice.app.util.Prefs
 
 /**
@@ -60,8 +61,10 @@ object WakeTrigger {
      * 4. 无权限 → 拉起 MainActivity 请求授权（授权后 onRequestPermissionsResult 继续）。
      */
     fun trigger(context: Context) {
+        LogFile.d("wake.trigger state=${VoiceController.currentState}")
         // M4-1.3.1：再按一次 = 停止录音
         if (VoiceController.currentState == VoiceController.State.RECORDING) {
+            LogFile.d("wake.trigger -> stopRecording")
             VoiceController.stopRecording()
             return
         }
@@ -69,6 +72,7 @@ object WakeTrigger {
             context, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!granted) {
+            LogFile.d("wake.trigger perm=false -> MainActivity(auth)")
             context.startActivity(wakeIntent(context))
             return
         }
@@ -78,13 +82,15 @@ object WakeTrigger {
                 val intent = Intent(context, FairyOverlayService::class.java).apply {
                     action = ACTION_FAIRY_OVERLAY_WAKE
                 }
+                LogFile.d("wake.trigger client=alive -> OverlayService")
                 ContextCompat.startForegroundService(context, intent)
                 return
             } catch (e: Exception) {
-                // 极端情况仍受限：降级 MainActivity
+                LogFile.e("wake.trigger FGS fail: ${e.message} -> MainActivity")
             }
         }
         // 冷启动 / 未连接：拉起 MainActivity，由其自动连接 B 端并触发唤醒
+        LogFile.d("wake.trigger -> MainActivity(WAKE)")
         context.startActivity(wakeIntent(context))
     }
 }

@@ -121,6 +121,14 @@
             android:layout_marginTop="8dp"
             android:text="@string/btn_share_record" />
 
+        <!-- M4-1.3.7：导出诊断日志（filesDir/logs/fairy_log.txt） -->
+        <Button
+            android:id="@+id/btnShareLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/btn_share_log" />
+
         <TextView
             android:id="@+id/tvVoiceState"
             android:layout_width="match_parent"

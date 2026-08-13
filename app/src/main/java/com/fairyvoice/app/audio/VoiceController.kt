@@ -17,6 +17,7 @@ package com.fairyvoice.app.audio
 
 import android.content.Context
 import com.fairyvoice.app.FairyClientHolder
+import com.fairyvoice.app.util.LogFile
 import com.fairyvoice.app.protocol.FairyVoiceException
 import java.io.File
 import java.text.SimpleDateFormat
@@ -72,7 +73,11 @@ object VoiceController {
     /** 开始录音：生成时间戳文件名，落到 filesDir/recordings/。需已有 RECORD_AUDIO 权限。 */
     fun startRecording(context: Context, autoAsk: Boolean) {
         synchronized(lock) {
-            if (state != State.IDLE) return
+            if (state != State.IDLE) {
+                LogFile.d("VC.startRecording skipped state=$state")
+                return
+            }
+            LogFile.d("VC.startRecording autoAsk=$autoAsk")
             val dir = File(context.filesDir, "recordings").apply { mkdirs() }
             val name = "fairy_" +
                 SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".wav"
@@ -91,7 +96,9 @@ object VoiceController {
                     notifyRecorded(file, hadSpeech)
                     // M4-1.3：无语音 / 录音过短视为无效唤醒，不进 ask 链路
                     val pcm = file.length() - WAV_HEADER_SIZE
-                    if (autoAsk && hadSpeech && pcm >= MIN_SPEECH_BYTES.toLong()) {
+                    val goAsk = autoAsk && hadSpeech && pcm >= MIN_SPEECH_BYTES.toLong()
+                    LogFile.d("VC.onStop speech=$hadSpeech pcm=$pcm goAsk=$goAsk")
+                    if (goAsk) {
                         askWithPlaceholder()
                     }
                 }
@@ -99,6 +106,7 @@ object VoiceController {
                 override fun onError(e: Exception) {
                     synchronized(lock) { recorder = null }
                     setState(State.IDLE)
+                    LogFile.e("VC.onError ${e.message}")
                     notifyError(e)
                 }
             })
@@ -128,11 +136,14 @@ object VoiceController {
                     client = FairyClientHolder.client
                 }
                 if (client == null || !client.isConnected) {
+                    LogFile.e("VC.ask notConnected waited=$waited")
                     throw FairyVoiceException.NotConnected("未连接 B 端，先启动连接")
                 }
                 setState(State.WAITING_AI)
+                LogFile.d("VC.ask connected waited=$waited")
                 val resp = client.sendAsk(ASR_PLACEHOLDER_TEXT, "zh-CN")
                 setState(State.IDLE)
+                LogFile.d("VC.ask resp ok=${resp.ok} err=${resp.errorCode}")
                 if (resp.ok) {
                     notifyReply(resp.text ?: "")
                 } else {
