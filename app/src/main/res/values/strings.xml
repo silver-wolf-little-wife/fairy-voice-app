@@ -16,6 +16,16 @@
     <string name="status_disconnected">未连接</string>
     <string name="status_auth_error">握手被拒绝（token 错误）</string>
 
+    <string name="section_m4_record">M4 语音：录音</string>
+    <string name="btn_record_start">开始录音（测试）</string>
+    <string name="btn_record_stop">停止录音</string>
+    <string name="voice_state_idle">空闲</string>
+    <string name="voice_state_recording">录音中…</string>
+    <string name="voice_state_recognizing">识别中…</string>
+    <string name="voice_state_waiting_ai">等待 Fairy…</string>
+    <string name="voice_state_speaking">播报中…</string>
+    <string name="record_hint">M4-1：按音量上+音量下（或点上方按钮）开始录音，再按一次停止。16kHz/16bit/单声道 WAV，15 秒自动停止，保存到 filesDir/recordings。</string>
+
     <string name="section_test">M3 联调：发送测试指令</string>
     <string name="hint_ask_input">输入要发给 Fairy 的指令…</string>
     <string name="btn_send_ask">发送 ask</string>

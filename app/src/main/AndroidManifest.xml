@@ -15,7 +15,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FairyVoice">
+        android:theme="@style/Theme.FairyVoice"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic: B 端 fairy-voice ws_server 仅提供 ws://（明文），
+             targetSdk 28+ 默认禁止明文流量，不开此开关则 ws:// 连接会被 OkHttp
+             在发起 TCP 前直接拒绝，表现为无限重连、永远卡"连接中"。 -->
 
         <activity
             android:name=".MainActivity"

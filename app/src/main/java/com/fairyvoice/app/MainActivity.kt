@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * 主界面：B 端连接配置 + 状态 + M3 联调（手动输入指令触发 ask）+ 唤醒引导。
+ * M4-1：唤醒/按钮触发录音（VoiceController），运行时请求 RECORD_AUDIO 权限。
  */
 package com.fairyvoice.app
 
@@ -25,22 +26,26 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.protocol.FairyVoiceException
 import com.fairyvoice.app.service.ConnectionService
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.FairyVoiceTileService
 import com.fairyvoice.app.wake.WakeTrigger
 import com.fairyvoice.app.wake.WakeKeyService
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var tvReply: TextView
+    private lateinit var tvVoiceState: TextView
     private lateinit var etServerUrl: EditText
     private lateinit var etToken: EditText
     private lateinit var etDeviceId: EditText
     private lateinit var etHeartbeat: EditText
     private lateinit var etAskInput: EditText
+    private lateinit var btnRecordTest: Button
 
     /**
      * 用户已点击「启动连接」但 ConnectionService 尚未创建 client 时（startForegroundService
@@ -65,17 +70,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** M4-1：录音状态/结果回显（回调在录音线程，统一切主线程）。 */
+    private val voiceListener = object : VoiceController.Listener {
+        override fun onStateChanged(state: VoiceController.State) {
+            runOnUiThread { updateVoiceUi() }
+        }
+
+        override fun onRecorded(file: File) {
+            runOnUiThread {
+                tvReply.text = "录音完成：${file.absolutePath}"
+                Toast.makeText(this@MainActivity, "录音已保存", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        override fun onError(e: Exception) {
+            runOnUiThread {
+                tvReply.text = "录音失败：${e.message}"
+                Toast.makeText(this@MainActivity, "录音失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         tvStatus = findViewById(R.id.tvStatus)
         tvReply = findViewById(R.id.tvReply)
+        tvVoiceState = findViewById(R.id.tvVoiceState)
         etServerUrl = findViewById(R.id.etServerUrl)
         etToken = findViewById(R.id.etToken)
         etDeviceId = findViewById(R.id.etDeviceId)
         etHeartbeat = findViewById(R.id.etHeartbeat)
         etAskInput = findViewById(R.id.etAskInput)
+        btnRecordTest = findViewById(R.id.btnRecordTest)
 
         loadPrefsIntoUi()
 
@@ -86,6 +114,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
         findViewById<Button>(R.id.btnAddTile).setOnClickListener { onAddTileClick() }
+        btnRecordTest.setOnClickListener { onRecordTestClick() }
+
+        VoiceController.setListener(voiceListener)
+        updateVoiceUi()
 
         requestNotificationPermissionIfNeeded()
         refreshStatus()
@@ -110,6 +142,11 @@ class MainActivity : AppCompatActivity() {
         runCatching { unregisterReceiver(wakeReceiver) }
     }
 
+    override fun onDestroy() {
+        VoiceController.setListener(null)
+        super.onDestroy()
+    }
+
     /**
      * singleTask 模式：App 已在后台/栈内时，磁贴/通知栏唤醒走 onNewIntent。
      * 此时动态注册的 receiver 可能尚未就绪，直接在这里处理，保证唤醒稳定。
@@ -121,9 +158,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == RC_RECORD_AUDIO) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                VoiceController.startRecording(this)
+            } else {
+                Toast.makeText(this, "未授予麦克风权限，无法录音", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** M4-1：唤醒 = 请求麦克风权限并开始/停止录音（再按一次停止）。 */
     private fun handleWake() {
-        etAskInput.requestFocus()
-        Toast.makeText(this, "Fairy 已唤醒", Toast.LENGTH_SHORT).show()
+        requestRecordPermissionAndToggle()
     }
 
     // ---------- 事件 ----------
@@ -194,6 +246,43 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /** M4-1：录音测试按钮（与唤醒同走 VoiceController.toggle）。 */
+    private fun onRecordTestClick() {
+        requestRecordPermissionAndToggle()
+    }
+
+    private fun requestRecordPermissionAndToggle() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            VoiceController.toggle(this)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            ActivityCompat.requestPermissions(
+                this, arrayOf(Manifest.permission.RECORD_AUDIO), RC_RECORD_AUDIO
+            )
+        } else {
+            VoiceController.toggle(this)
+        }
+    }
+
+    /** 按当前状态刷新录音按钮文案与状态文本。 */
+    private fun updateVoiceUi() {
+        val s = VoiceController.currentState
+        btnRecordTest.text = getString(
+            if (s == VoiceController.State.RECORDING) R.string.btn_record_stop
+            else R.string.btn_record_start
+        )
+        tvVoiceState.text = getString(
+            when (s) {
+                VoiceController.State.IDLE -> R.string.voice_state_idle
+                VoiceController.State.RECORDING -> R.string.voice_state_recording
+                VoiceController.State.RECOGNIZING -> R.string.voice_state_recognizing
+                VoiceController.State.WAITING_AI -> R.string.voice_state_waiting_ai
+                VoiceController.State.SPEAKING -> R.string.voice_state_speaking
+            }
+        )
+    }
+
     // ---------- 配置 ----------
 
     private fun loadPrefsIntoUi() {
@@ -238,5 +327,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val STATUS_POLL_MS = 2_000L
+        private const val RC_RECORD_AUDIO = 101
     }
 }
