@@ -5,12 +5,15 @@ plugins {
 
 android {
     namespace = "com.fairyvoice.app"
-    compileSdk = 36
+    // M4-1.2：compileSdk 37 提供 Android 16 QPR1+ 的 Live Updates API
+    // （Notification.Builder.setRequestPromotedOngoing / Manifest.permission.POST_PROMOTED_NOTIFICATIONS）
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.fairyvoice.app"
         minSdk = 26
-        targetSdk = 34
+        // M4-1.2：targetSdk 36 = Android 16 行为；Live Updates 官方要求 targetSdk 36（QPR1 规范）
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
     }

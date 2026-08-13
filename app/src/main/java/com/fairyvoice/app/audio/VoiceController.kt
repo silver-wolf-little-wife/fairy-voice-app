@@ -2,17 +2,25 @@
 /**
  * 语音链路控制器（M4 起）：统一调度 录音 → ASR → ask → TTS 的状态机。
  *
- * M4-1 只实现「录音」段（IDLE ↔ RECORDING）；RECOGNIZING / WAITING_AI / SPEAKING
- * 为 M4-2 起的 ASR/TTS 预留。唤醒（WakeTrigger）与界面按钮统一走 [toggle]。
- * 回调在录音线程触发，Listener 实现方自行切主线程。
+ * M4-1 只实现「录音」段（IDLE ↔ RECORDING）。
+ * M4-1.2 增加 [startWake] 唤醒链路：录音完成 → RECOGNIZING（ASR 未接，用占位文本）
+ * → WAITING_AI（sendAsk）→ onReply / onError，支撑悬浮窗/流体云卡片显示 AI 回复。
+ * RECOGNIZING / WAITING_AI / SPEAKING 为 M4-2 起的 ASR/TTS 预留。
+ * 回调在录音/请求线程触发，Listener 实现方自行切主线程。
+ *
+ * M4-1.2：Listener 支持多播（MainActivity 与 FairyOverlayService 同时监听），
+ * 使用 [addListener]/[removeListener]，不再用 setListener 单播。
  */
 package com.fairyvoice.app.audio
 
 import android.content.Context
+import com.fairyvoice.app.FairyClientHolder
+import com.fairyvoice.app.protocol.FairyVoiceException
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
 
 object VoiceController {
 
@@ -21,31 +29,43 @@ object VoiceController {
     interface Listener {
         fun onStateChanged(state: State)
         fun onRecorded(file: File)
+        fun onReply(text: String) {}
         fun onError(e: Exception)
     }
+
+    /** M4-2 ASR 接入点：当前录音完成后直接发这条占位文本走 ask 链路，验证悬浮窗/卡片交互。 */
+    const val ASR_PLACEHOLDER_TEXT = "你好"
 
     @Volatile
     private var state = State.IDLE
 
-    @Volatile
-    private var listener: Listener? = null
+    private val listeners = CopyOnWriteArrayList<Listener>()
 
     private var recorder: AudioRecorder? = null
     private val lock = Any()
 
     val currentState: State get() = state
 
-    fun setListener(l: Listener?) {
-        listener = l
+    fun addListener(l: Listener) {
+        listeners.addIfAbsent(l)
     }
 
-    /** 唤醒/按钮触发：录音中则停止，否则开始录音。 */
+    fun removeListener(l: Listener) {
+        listeners.remove(l)
+    }
+
+    /** 唤醒/按钮触发：录音中则停止，否则开始录音（纯录音，不自动 ask，录音测试按钮用）。 */
     fun toggle(context: Context) {
-        if (state == State.RECORDING) stopRecording() else startRecording(context)
+        if (state == State.RECORDING) stopRecording() else startRecording(context, autoAsk = false)
+    }
+
+    /** M4-1.2 唤醒链路：开始录音，录音完成后自动走 ASR 占位文本 → ask → onReply。 */
+    fun startWake(context: Context) {
+        startRecording(context, autoAsk = true)
     }
 
     /** 开始录音：生成时间戳文件名，落到 filesDir/recordings/。需已有 RECORD_AUDIO 权限。 */
-    fun startRecording(context: Context) {
+    fun startRecording(context: Context, autoAsk: Boolean) {
         synchronized(lock) {
             if (state != State.IDLE) return
             val dir = File(context.filesDir, "recordings").apply { mkdirs() }
@@ -63,13 +83,14 @@ object VoiceController {
                 override fun onStop(file: File) {
                     synchronized(lock) { recorder = null }
                     setState(State.IDLE)
-                    listener?.onRecorded(file)
+                    notifyRecorded(file)
+                    if (autoAsk) askWithPlaceholder()
                 }
 
                 override fun onError(e: Exception) {
                     synchronized(lock) { recorder = null }
                     setState(State.IDLE)
-                    listener?.onError(e)
+                    notifyError(e)
                 }
             })
             if (!started) setState(State.IDLE)
@@ -81,8 +102,44 @@ object VoiceController {
         synchronized(lock) { recorder?.stop() }
     }
 
+    /** M4-1.2：录音完成 →（ASR 占位）→ sendAsk → onReply。未连接则报错。 */
+    private fun askWithPlaceholder() {
+        Thread {
+            setState(State.RECOGNIZING)
+            try {
+                val client = FairyClientHolder.client
+                if (client == null || !client.isConnected) {
+                    throw FairyVoiceException.NotConnected("未连接 B 端，先启动连接")
+                }
+                setState(State.WAITING_AI)
+                val resp = client.sendAsk(ASR_PLACEHOLDER_TEXT, "zh-CN")
+                setState(State.IDLE)
+                if (resp.ok) {
+                    notifyReply(resp.text ?: "")
+                } else {
+                    notifyError(FairyVoiceException.AskError(resp.errorCode ?: "unknown", resp.errorMessage ?: ""))
+                }
+            } catch (e: Exception) {
+                setState(State.IDLE)
+                notifyError(e)
+            }
+        }.start()
+    }
+
     private fun setState(s: State) {
         state = s
-        listener?.onStateChanged(s)
+        for (l in listeners) l.onStateChanged(s)
+    }
+
+    private fun notifyRecorded(file: File) {
+        for (l in listeners) l.onRecorded(file)
+    }
+
+    private fun notifyReply(text: String) {
+        for (l in listeners) l.onReply(text)
+    }
+
+    private fun notifyError(e: Exception) {
+        for (l in listeners) l.onError(e)
     }
 }

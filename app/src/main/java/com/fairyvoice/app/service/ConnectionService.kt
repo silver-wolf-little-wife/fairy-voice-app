@@ -3,6 +3,7 @@
  * 常驻前台服务：持有 FairyVoiceClient，断线自动重连，通知栏显示状态。
  * 通知附带「唤醒」按钮，作为控制中心磁贴之外的又一个虚拟唤醒入口。
  * M3 阶段只做连接骨架；M4 在此挂接录音/识别/TTS 状态机。
+ * M4-1.2：通知「唤醒」按钮改走 FairyOverlayService（不拉起全屏 App，直接录音）。
  */
 package com.fairyvoice.app.service
 
@@ -70,11 +71,13 @@ class ConnectionService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        // 「唤醒」按钮：直接拉起主界面，Intent 带 WAKE action（M4-1.1 修复，
-        // 原实现无 action 导致 onNewIntent 识别不了、点击无反应）。
-        val wakePi = PendingIntent.getActivity(
+        // M4-1.2：「唤醒」按钮不再拉起全屏 App，改为启动 FairyOverlayService 直接录音
+        // （悬浮窗/流体云 + AI 回复卡片）。缺 RECORD_AUDIO 权限时服务内兜底拉起授权页。
+        val wakePi = PendingIntent.getService(
             this, 1,
-            WakeTrigger.wakeIntent(this),
+            Intent(this, FairyOverlayService::class.java).apply {
+                action = WakeTrigger.ACTION_FAIRY_OVERLAY_WAKE
+            },
             PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)

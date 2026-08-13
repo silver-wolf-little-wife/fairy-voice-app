@@ -44,12 +44,27 @@
     <!-- 磁贴是动作按钮：恒暗态可点击，连接状态只放副标题（M4-1.1） -->
     <string name="tile_subtitle_connected">已连接 · 点击唤醒</string>
     <string name="tile_subtitle_idle">点击唤醒</string>
+    <!-- M4-1.2：录音中副标题 -->
+    <string name="tile_subtitle_recording">录音中…</string>
 
     <string name="notification_channel_name">Fairy Voice 连接</string>
     <string name="notification_title">Fairy Voice 运行中</string>
     <!-- 固定文案不写「已连接」，避免未连接时误导；真实连接状态以 App 内显示为准 -->
     <string name="notification_text">点击可唤醒 Fairy</string>
     <string name="notification_action_wake">唤醒</string>
+
+    <!-- M4-1.2：悬浮窗 / 流体云 -->
+    <string name="overlay_channel_live">Fairy 状态</string>
+    <string name="overlay_recording">● 录音中…（点击停止）</string>
+    <string name="overlay_recognizing">识别中…</string>
+    <string name="overlay_waiting_ai">等待 Fairy…</string>
+    <string name="overlay_speaking">播报中…</string>
+    <string name="overlay_reply_title">Fairy 回复</string>
+    <string name="overlay_error">出错了</string>
+    <string name="overlay_btn_copy">复制</string>
+    <string name="overlay_btn_close">收起</string>
+    <string name="overlay_copied">已复制到剪贴板</string>
+    <string name="overlay_permission_hint">建议开启悬浮窗权限：唤醒时显示胶囊与 AI 回复卡片（未开启则通过通知/流体云呈现）</string>
 
     <string name="accessibility_description">用于监听音量键组合，实现 Fairy Voice 的实体键唤醒（仅识别音量上+音量下同时按下，不拦截任何按键）</string>
 </resources>

@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- M4-1.2：悬浮窗（小布/Siri 式胶囊与卡片） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- M4-1.2：Android 16 QPR1+ 的 Live Updates（ColorOS 16 流体云）提升权限；
+         非 QPR1 设备不认识此权限会忽略，无副作用 -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- M4 语音闭环预留 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
@@ -33,6 +38,13 @@
 
         <service
             android:name=".service.ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- M4-1.2：悬浮窗 + 录音 + 流体云/Live Updates 前台服务（随「启动连接」常驻，
+             唤醒时通过 action 控制，避免后台启动 FGS 限制） -->
+        <service
+            android:name=".service.FairyOverlayService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

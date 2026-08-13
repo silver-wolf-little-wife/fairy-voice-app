@@ -18,29 +18,51 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import androidx.core.content.ContextCompat
 import com.fairyvoice.app.MainActivity
+import com.fairyvoice.app.service.FairyOverlayService
 import com.fairyvoice.app.util.Prefs
 
 /**
  * 统一唤醒入口：磁贴、无障碍服务、通知栏按钮共用。
  *
- * ⚠️ M4-1.1 修复：旧实现「startActivity + 动态广播」双通道，但 Intent 没带
- * ACTION_FAIRY_WAKE，导致 onNewIntent 识别不了（App 已在前台时点击无反应）；
- * 而广播在 App 冷启动时无人接收。现统一改为「Intent 带 action」驱动
- * MainActivity.onCreate/onNewIntent 直接触发录音，不再依赖广播。
+ * M4-1.2 起：唤醒 = 不拉起全屏 App，直接启动 FairyOverlayService
+ * （悬浮窗胶囊/流体云胶囊 + 录音 + AI 回复卡片）。
+ * 缺 RECORD_AUDIO 权限（仅首次）→ 拉起 MainActivity 走授权，授权后继续。
  */
 object WakeTrigger {
     const val ACTION_FAIRY_WAKE = "com.fairyvoice.app.action.WAKE"
+    /** FairyOverlayService 内「开始唤醒」action。 */
+    const val ACTION_FAIRY_OVERLAY_WAKE = "com.fairyvoice.app.action.OVERLAY_WAKE"
 
-    /** 唤醒主界面用的 Intent：带 WAKE action，保证冷启动 onCreate / 热启动 onNewIntent 都能识别。 */
+    /** 拉起主界面用的 Intent：带 WAKE action，冷启动 onCreate / 热启动 onNewIntent 都能识别。 */
     fun wakeIntent(context: Context): Intent =
         Intent(context, MainActivity::class.java).apply {
             action = ACTION_FAIRY_WAKE
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
 
+    /**
+     * 统一触发：有 RECORD_AUDIO 权限 → 启动 FairyOverlayService 直接录音；
+     * 无权限 → 拉起 MainActivity 请求授权（授权后 onRequestPermissionsResult 继续）。
+     * 后台启动 FGS 受限（如个别 Android 15+ 无障碍路径）→ 捕获并回退拉起 MainActivity。
+     */
     fun trigger(context: Context) {
-        context.startActivity(wakeIntent(context))
+        val granted = ContextCompat.checkSelfPermission(
+            context, android.Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            context.startActivity(wakeIntent(context))
+            return
+        }
+        try {
+            val intent = Intent(context, FairyOverlayService::class.java).apply {
+                action = ACTION_FAIRY_OVERLAY_WAKE
+            }
+            ContextCompat.startForegroundService(context, intent)
+        } catch (e: Exception) {
+            context.startActivity(wakeIntent(context))
+        }
     }
 }
 

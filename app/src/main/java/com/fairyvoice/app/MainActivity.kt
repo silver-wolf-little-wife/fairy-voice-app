@@ -3,6 +3,8 @@
  * 主界面：B 端连接配置 + 状态 + M3 联调（手动输入指令触发 ask）+ 唤醒引导。
  * M4-1：唤醒/按钮触发录音（VoiceController），运行时请求 RECORD_AUDIO 权限。
  * M4-1.1：唤醒改 Intent action 驱动（不再依赖动态广播），新增录音分享导出。
+ * M4-1.2：唤醒不再拉起全屏 App——统一走 FairyOverlayService（悬浮窗/流体云 + 录音 + AI 回复卡片），
+ *         仅权限缺失时经本页授权；新增悬浮窗权限引导与 POST_PROMOTED_NOTIFICATIONS（Live Updates）请求。
  */
 package com.fairyvoice.app
 
@@ -29,6 +31,7 @@ import androidx.core.content.FileProvider
 import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.protocol.FairyVoiceException
 import com.fairyvoice.app.service.ConnectionService
+import com.fairyvoice.app.service.FairyOverlayService
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.FairyVoiceTileService
 import com.fairyvoice.app.wake.WakeTrigger
@@ -57,6 +60,9 @@ class MainActivity : AppCompatActivity() {
      * 异步启动），状态也显示「连接中」，避免点击后仍显示「未连接」的误导。
      */
     private var startRequested = false
+
+    /** M4-1.2：RECORD_AUDIO 授权后继续唤醒链路（悬浮窗录音）而非录音测试。 */
+    private var pendingWake = false
 
     /** 前台时每 2s 轮询连接状态，让「连接中 → 已连接/失败」自动刷新，无需重进页面。 */
     private val statusHandler = Handler(Looper.getMainLooper())
@@ -87,6 +93,10 @@ class MainActivity : AppCompatActivity() {
                 )
                 Toast.makeText(this@MainActivity, "录音已保存", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        override fun onReply(text: String) {
+            runOnUiThread { tvReply.text = "Fairy：$text" }
         }
 
         override fun onError(e: Exception) {
@@ -124,7 +134,7 @@ class MainActivity : AppCompatActivity() {
         btnRecordTest.setOnClickListener { onRecordTestClick() }
         btnShareRecord.setOnClickListener { onShareRecordClick() }
 
-        VoiceController.setListener(voiceListener)
+        VoiceController.addListener(voiceListener)
         updateVoiceUi()
 
         requestNotificationPermissionIfNeeded()
@@ -150,7 +160,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        VoiceController.setListener(null)
+        VoiceController.removeListener(voiceListener)
         super.onDestroy()
     }
 
@@ -173,16 +183,22 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == RC_RECORD_AUDIO) {
             if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                VoiceController.startRecording(this)
+                if (pendingWake) {
+                    pendingWake = false
+                    // 唤醒链路：不拉起全屏，直接走悬浮窗/流体云服务录音
+                    FairyOverlayService.startWake(this)
+                } else {
+                    VoiceController.toggle(this)
+                }
             } else {
                 Toast.makeText(this, "未授予麦克风权限，无法录音", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    /** M4-1：唤醒 = 请求麦克风权限并开始/停止录音（再按一次停止）。 */
+    /** M4-1.2：唤醒 = 权限已授直接走悬浮窗链路；未授请求授权后继续。 */
     private fun handleWake() {
-        requestRecordPermissionAndToggle()
+        requestRecordPermissionAndToggle(wake = true)
     }
 
     // ---------- 事件 ----------
@@ -190,21 +206,28 @@ class MainActivity : AppCompatActivity() {
     private fun onStartClick() {
         saveUiToPrefs()
         startRequested = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100
-            )
-        }
+        requestNotificationAndPromotedPermission()
         ConnectionService.start(this)
+        // M4-1.2：悬浮窗服务随连接常驻（前台场景启动，规避后台 FGS 限制；空闲不显示悬浮球）
+        FairyOverlayService.ensureRunning(this)
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, getString(R.string.overlay_permission_hint), Toast.LENGTH_LONG).show()
+            runCatching {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:$packageName"),
+                    )
+                )
+            }
+        }
         refreshStatus()
     }
 
     private fun onStopClick() {
         startRequested = false
         ConnectionService.stop(this)
+        FairyOverlayService.stop(this)
         FairyClientHolder.clear()
         refreshStatus()
     }
@@ -253,9 +276,9 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** M4-1：录音测试按钮（与唤醒同走 VoiceController.toggle）。 */
+    /** M4-1：录音测试按钮（纯录音，不弹悬浮窗）。 */
     private fun onRecordTestClick() {
-        requestRecordPermissionAndToggle()
+        requestRecordPermissionAndToggle(wake = false)
     }
 
     /** M4-1.1：分享最近一次录音（FileProvider 授权 URI，系统分享面板导出）。 */
@@ -274,17 +297,22 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(intent, getString(R.string.share_record_title)))
     }
 
-    private fun requestRecordPermissionAndToggle() {
+    /**
+     * M4-1.2：wake=true 时授权完成后继续唤醒链路（FairyOverlayService.startWake），
+     * 录音测试（wake=false）走 VoiceController.toggle。
+     */
+    private fun requestRecordPermissionAndToggle(wake: Boolean) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
         ) {
-            VoiceController.toggle(this)
+            if (wake) FairyOverlayService.startWake(this) else VoiceController.toggle(this)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            pendingWake = wake
             ActivityCompat.requestPermissions(
                 this, arrayOf(Manifest.permission.RECORD_AUDIO), RC_RECORD_AUDIO
             )
         } else {
-            VoiceController.toggle(this)
+            if (wake) FairyOverlayService.startWake(this) else VoiceController.toggle(this)
         }
     }
 
@@ -337,15 +365,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestNotificationPermissionIfNeeded() {
+    /** 通知权限（Android 13+）与 Live Updates 提升权限（Android 16 QPR1+）一并请求；后者拒绝只降级普通通知。 */
+    private fun requestNotificationAndPromotedPermission() {
+        val perms = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100
-            )
+            perms.add(Manifest.permission.POST_NOTIFICATIONS)
         }
+        if (Build.VERSION.SDK_INT >= 36 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_PROMOTED_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            perms.add(Manifest.permission.POST_PROMOTED_NOTIFICATIONS)
+        }
+        if (perms.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, perms.toTypedArray(), 100)
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        requestNotificationAndPromotedPermission()
     }
 
     companion object {

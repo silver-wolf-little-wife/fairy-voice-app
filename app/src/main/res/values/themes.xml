@@ -6,5 +6,7 @@
         <item name="colorSecondary">@color/fairy_blue_dark</item>
         <item name="android:statusBarColor">@color/fairy_bg</item>
         <item name="android:navigationBarColor">@color/fairy_bg</item>
+        <!-- targetSdk 35+ 强制 edge-to-edge：退出强制，避免状态栏/导航栏与内容重叠 -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
     </style>
 </resources>
