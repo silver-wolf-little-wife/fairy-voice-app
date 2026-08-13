@@ -26,6 +26,33 @@ class ProtocolTest {
     }
 
     @Test
+    fun `voiceAskFrame carries id audio lang`() {
+        val raw = voiceAskFrame("abc", "AAAA", "zh-CN")
+        assertTrue(raw.contains("\"type\":\"voice_ask\""))
+        assertTrue(raw.contains("\"id\":\"abc\""))
+        assertTrue(raw.contains("\"audio\":\"AAAA\""))
+        assertTrue(raw.contains("\"lang\":\"zh-CN\""))
+    }
+
+    @Test
+    fun `ResponseFrame parse carries recognized`() {
+        val raw = """{"type":"response","id":"abc","ok":true,"data":{"text":"明天晴","recognized":"明天天气怎么样"},"error":null}"""
+        val frame = ResponseFrame.parse(raw)
+        assertEquals("abc", frame.id)
+        assertTrue(frame.ok)
+        assertEquals("明天晴", frame.text)
+        assertEquals("明天天气怎么样", frame.recognized)
+    }
+
+    @Test
+    fun `ResponseFrame without recognized keeps null`() {
+        val raw = """{"type":"response","id":"abc","ok":true,"data":{"text":"明天晴"},"error":null}"""
+        val frame = ResponseFrame.parse(raw)
+        assertEquals("明天晴", frame.text)
+        assertEquals(null, frame.recognized)
+    }
+
+    @Test
     fun `HelloAck parse ok`() {
         val ack = HelloAck.parse("""{"type":"hello_ack","ok":true,"session_id":"s1","server_version":"0.1.0"}""")
         assertTrue(ack.ok)

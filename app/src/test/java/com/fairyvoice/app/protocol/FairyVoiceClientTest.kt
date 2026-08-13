@@ -50,6 +50,13 @@ class FairyVoiceClientTest {
                         webSocket.send(ack)
                     }
                     text.contains("\"ping\"") -> webSocket.send("""{"type":"pong"}""")
+                    text.contains("\"voice_ask\"") -> {
+                        // 注意：voice_ask 包含子串 "ask"，必须放在 ask 分支之前判断
+                        val id = Regex("\"id\":\"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: ""
+                        webSocket.send(
+                            """{"type":"response","id":"$id","ok":true,"data":{"text":"$replyText","recognized":"识别文本"},"error":null}"""
+                        )
+                    }
                     text.contains("\"ask\"") -> {
                         val id = Regex("\"id\":\"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: ""
                         webSocket.send(
@@ -109,6 +116,33 @@ class FairyVoiceClientTest {
         assertTrue(resp.ok)
         assertEquals("明天晴", resp.text)
         c.stop()
+    }
+
+    @Test
+    fun `sendVoiceAsk returns AI reply with recognized`() {
+        enqueueFakeServer(replyText = "明天晴")
+        val ready = CountDownLatch(1)
+        val c = client()
+        c.onReady = { ready.countDown() }
+        c.start()
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+
+        val resp = c.sendVoiceAsk("base64wavdata==")
+        assertTrue(resp.ok)
+        assertEquals("明天晴", resp.text)
+        assertEquals("识别文本", resp.recognized)
+        c.stop()
+    }
+
+    @Test
+    fun `sendVoiceAsk before connected throws NotConnected`() {
+        val c = client()
+        try {
+            c.sendVoiceAsk("base64wavdata==")
+            assertTrue("未连接时应抛 NotConnected", false)
+        } catch (e: FairyVoiceException.NotConnected) {
+            // expected
+        }
     }
 
     @Test

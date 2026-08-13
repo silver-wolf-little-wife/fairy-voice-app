@@ -210,9 +210,9 @@ class FairyOverlayService : Service() {
             // startWake 内部继续走 ASR 占位 → ask，无需处理
         }
 
-        override fun onReply(text: String) {
+        override fun onReply(text: String, recognized: String?) {
             uiHandler.post {
-                LogFile.d("Overlay.onReply len=${text.length}")
+                LogFile.d("Overlay.onReply recognized=${recognized} len=${text.length}")
                 lastReply = text
                 showCard(text)
                 if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_reply_title), text)

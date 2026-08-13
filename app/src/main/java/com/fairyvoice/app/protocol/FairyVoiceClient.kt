@@ -217,7 +217,7 @@ class FairyVoiceClient(
         heartbeatTask = null
     }
 
-    // ---------- ask ----------
+    // ---------- ask / voice_ask ----------
 
     /** 发送语音指令文本，阻塞等待 B 端响应（最多 askTimeoutMs）。 */
     @Throws(FairyVoiceException::class)
@@ -228,6 +228,37 @@ class FairyVoiceClient(
         val fut = CompletableFuture<ResponseFrame>()
         pending[id] = fut
         if (!sock.send(askFrame(id, text, lang))) {
+            pending.remove(id)
+            throw FairyVoiceException.NotConnected()
+        }
+        return try {
+            fut.get(askTimeoutMs, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            pending.remove(id)
+            throw FairyVoiceException.AskError("timeout", "等待 B 端响应超时")
+        } catch (e: ExecutionException) {
+            pending.remove(id)
+            val cause = e.cause
+            throw when (cause) {
+                is FairyVoiceException -> cause
+                else -> FairyVoiceException.AskError("internal_error", cause?.message ?: "未知错误")
+            }
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            pending.remove(id)
+            throw FairyVoiceException.NotConnected("已中断")
+        }
+    }
+
+    /** 发送语音指令（M4-2：WAV base64 → B 端 ASR 识别 → AI 回复），阻塞等待。 */
+    @Throws(FairyVoiceException::class)
+    fun sendVoiceAsk(audioBase64: String, lang: String = "zh-CN"): ResponseFrame {
+        val sock = ws
+        if (sock == null || !connected) throw FairyVoiceException.NotConnected()
+        val id = UUID.randomUUID().toString()
+        val fut = CompletableFuture<ResponseFrame>()
+        pending[id] = fut
+        if (!sock.send(voiceAskFrame(id, audioBase64, lang))) {
             pending.remove(id)
             throw FairyVoiceException.NotConnected()
         }

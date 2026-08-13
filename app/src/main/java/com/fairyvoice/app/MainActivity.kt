@@ -109,14 +109,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        override fun onReply(text: String) {
-            runOnUiThread { tvReply.text = "Fairy：$text" }
+        override fun onReply(text: String, recognized: String?) {
+            runOnUiThread {
+                tvReply.text = if (recognized.isNullOrBlank()) {
+                    "Fairy：$text"
+                } else {
+                    "识别：$recognized\nFairy：$text"
+                }
+            }
         }
 
         override fun onError(e: Exception) {
             runOnUiThread {
-                tvReply.text = "录音失败：${e.message}"
-                Toast.makeText(this@MainActivity, "录音失败", Toast.LENGTH_SHORT).show()
+                tvReply.text = "语音指令失败：${e.message}"
+                Toast.makeText(this@MainActivity, "语音指令失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
