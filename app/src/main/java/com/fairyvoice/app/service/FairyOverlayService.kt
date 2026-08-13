@@ -74,6 +74,8 @@ class FairyOverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // M4-1.3.3：启动即清理上次残留的流体云通知（服务被系统重启后无人 cancel 会滞留）
+        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
         ensureChannels()
         startForegroundCompat()
         VoiceController.addListener(voiceListener)
@@ -134,7 +136,10 @@ class FairyOverlayService : Service() {
         hideTask = null
         lastReply = null
         removeOverlay()
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(NOTIFY_ID)
+        // M4-1.3.3：部分 ROM（ColorOS 流体云）取消 Live Update 有延迟，300ms 后二次兜底
+        uiHandler.postDelayed({ nm.cancel(NOTIFY_ID) }, 300)
     }
 
     // ---------- VoiceController 回调（录音线程 → 切主线程） ----------
@@ -290,7 +295,9 @@ class FairyOverlayService : Service() {
                 // API 36 初始版无此方法：降级普通通知，行为不变
             }
         }
-        nm.notify(NOTIFY_ID, builder.build())
+        // M4-1.3.3：notify 异常不冒泡（ColorOS 流体云 promoted 通知异常会导致主线程崩溃、
+        // 服务重启后流体云滞留且无人清理）
+        runCatching { nm.notify(NOTIFY_ID, builder.build()) }
     }
 
     private fun openAppPi(): PendingIntent =
@@ -345,7 +352,9 @@ class FairyOverlayService : Service() {
     companion object {
         private const val CHANNEL_CONN = "fairy_voice_conn"
         private const val CHANNEL_LIVE = "fairy_voice_live"
-        private const val FG_NOTIFY_ID = 1001
+        // M4-1.3.3：与 ConnectionService(1001) 隔离，防止两个前台服务通知互相覆盖
+        // 导致服务被系统误杀、流体云通知残留滞留
+        private const val FG_NOTIFY_ID = 2001
         private const val NOTIFY_ID = 1002
         private const val OVERLAY_Y_DP = 140
         private const val REPLY_SHOW_MS = 20_000L
