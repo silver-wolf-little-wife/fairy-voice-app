@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fairy_blue">#4FC3F7</color>
+    <color name="fairy_blue_dark">#0288D1</color>
+    <color name="fairy_bg">#0F1B2D</color>
+    <color name="fairy_text">#E1F5FE</color>
+    <color name="ic_launcher_background">#0F1B2D</color>
+</resources>

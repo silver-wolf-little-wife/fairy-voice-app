@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fairy Voice</string>
+
+    <string name="section_server">B 端连接</string>
+    <string name="label_server_url">服务器地址 (ws:// 或 wss://)</string>
+    <string name="label_token">Auth Token</string>
+    <string name="label_device_id">设备 ID</string>
+    <string name="label_heartbeat">心跳间隔 (秒)</string>
+
+    <string name="section_connection">连接</string>
+    <string name="btn_start">启动连接</string>
+    <string name="btn_stop">停止连接</string>
+    <string name="status_connecting">连接中…</string>
+    <string name="status_connected">已连接 ✓</string>
+    <string name="status_disconnected">未连接</string>
+    <string name="status_auth_error">握手被拒绝（token 错误）</string>
+
+    <string name="section_test">M3 联调：发送测试指令</string>
+    <string name="hint_ask_input">输入要发给 Fairy 的指令…</string>
+    <string name="btn_send_ask">发送 ask</string>
+
+    <string name="section_wake">唤醒方式</string>
+    <string name="btn_open_accessibility">开启无障碍服务（实体键唤醒）</string>
+    <string name="wake_hint">实体键：音量上 + 音量下 同时按下 0.5 秒（亮屏时任意界面生效）。\n电源键事件被系统独占，普通 APP 无法监听；OPPO ColorOS 无「电源键+音量上」映射任意应用的能力（侧键快捷仅支持系统预置功能），替代方案见下方控制中心磁贴。</string>
+
+    <string name="section_wake_tile">控制中心磁贴（替代唤醒）</string>
+    <string name="btn_add_tile">添加到控制中心</string>
+    <string name="tile_hint">下拉通知栏 → 点右上角编辑（铅笔图标）→ 把 Fairy Voice 拖入常用磁贴；点击磁贴即唤醒。Android 13+ 可先点上方按钮请求系统弹出添加入口。</string>
+    <string name="tile_label">Fairy Voice</string>
+    <string name="tile_subtitle_connected">已连接</string>
+    <string name="tile_subtitle_idle">点击唤醒</string>
+
+    <string name="notification_channel_name">Fairy Voice 连接</string>
+    <string name="notification_title">Fairy Voice 运行中</string>
+    <!-- 固定文案不写「已连接」，避免未连接时误导；真实连接状态以 App 内显示为准 -->
+    <string name="notification_text">点击可唤醒 Fairy</string>
+    <string name="notification_action_wake">唤醒</string>
+
+    <string name="accessibility_description">用于监听音量键组合，实现 Fairy Voice 的实体键唤醒（仅识别音量上+音量下同时按下，不拦截任何按键）</string>
+</resources>
