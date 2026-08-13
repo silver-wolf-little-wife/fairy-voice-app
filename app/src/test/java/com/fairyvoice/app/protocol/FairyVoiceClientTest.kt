@@ -124,13 +124,18 @@ class FairyVoiceClientTest {
 
     @Test
     fun `reconnects after server closes connection`() {
-        // 服务器：第一次 hello 后主动断开，第二次 hello 正常应答
+        // 服务器：第一次握手成功后立即断开（模拟 B 端重启），第二次握手正常应答。
+        // 注意：断开必须发生在 hello_ack 之后，否则客户端视为「握手期间断开」的
+        // 瞬时故障（静默重试，不触发 onReady），reconnect 闩将永远等不到。
         val helloCount = AtomicInteger(0)
         val listener = object : WebSocketListener() {
             override fun onMessage(webSocket: WebSocket, text: String) {
                 when {
                     text.contains("\"hello\"") -> {
                         if (helloCount.incrementAndGet() == 1) {
+                            webSocket.send(
+                                """{"type":"hello_ack","ok":true,"session_id":"s1","server_version":"0.1.0"}"""
+                            )
                             webSocket.close(1001, "server restart")
                         } else {
                             webSocket.send(

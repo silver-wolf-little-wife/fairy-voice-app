@@ -116,7 +116,7 @@ class FairyVoiceClient(
             } catch (e: FairyVoiceException.AuthError) {
                 onAuthError?.invoke(e.message ?: "握手失败")
             } catch (e: Exception) {
-                // 连接失败 / 网络异常，走退避
+                // 连接失败 / 握手期间断开 / 网络异常，走退避静默重试
             }
             if (stopped) break
             try {
@@ -180,12 +180,13 @@ class FairyVoiceClient(
         opened.await()
         if (!openOk.get()) throw IOException("连接失败")
 
-        // 握手
+        // 握手。握手期间连接被断开/超时属于瞬时故障（如 B 端重启），抛 IOException
+        // 走静默退避重试；只有 ack.ok=false（token 被拒）才算真正的认证错误。
         ws?.send(helloFrame(token, deviceId))
         if (!helloLatch.await(handshakeTimeoutMs, TimeUnit.MILLISECONDS)) {
-            throw FairyVoiceException.AuthError("timeout", "握手超时")
+            throw IOException("握手超时")
         }
-        val ack = helloAckRef.get() ?: throw FairyVoiceException.AuthError("bad_ack", "无握手应答")
+        val ack = helloAckRef.get() ?: throw IOException("握手期间连接断开")
         if (!ack.ok) throw FairyVoiceException.AuthError(ack.error ?: "unknown", ack.error ?: "握手被拒绝")
 
         // 握手成功，进入服务态
