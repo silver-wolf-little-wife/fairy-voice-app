@@ -411,7 +411,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestNotificationPermissionIfNeeded() {
-        requestNotificationAndPromotedPermission()
+        // M4-1.3.1锛歐AKE 鍐峰惎鍔紙纾佽创/瀹炰綋閿敜璧凤級涓嶅脊閫氱煡鏉冮檺妗嗭紝閬垮厤鎵撴柇鍞ら啋閾捐矾
+        if (intent?.action != WakeTrigger.ACTION_FAIRY_WAKE) {
+            requestNotificationAndPromotedPermission()
+        }
     }
 
     companion object {
@@ -420,4 +423,5 @@ class MainActivity : AppCompatActivity() {
         private const val WAV_HEADER_SIZE = 44L
     }
 }
+
 

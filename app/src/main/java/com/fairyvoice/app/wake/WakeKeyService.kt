@@ -20,6 +20,7 @@ import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
 import com.fairyvoice.app.MainActivity
+import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.service.FairyOverlayService
 import com.fairyvoice.app.util.Prefs
 
@@ -29,6 +30,9 @@ import com.fairyvoice.app.util.Prefs
  * M4-1.2 起：唤醒 = 不拉起全屏 App，直接启动 FairyOverlayService
  * （悬浮窗胶囊/流体云胶囊 + 录音 + AI 回复卡片）。
  * 缺 RECORD_AUDIO 权限（仅首次）→ 拉起 MainActivity 走授权，授权后继续。
+ *
+ * M4-1.3.1：先判定当前状态——录音中则停止录音（「再按一次停止」语义），
+ * 空闲才走启动链路；修复冷启动点磁贴「显示录音中但实际未录音」与再次点击无反应。
  */
 object WakeTrigger {
     const val ACTION_FAIRY_WAKE = "com.fairyvoice.app.action.WAKE"
@@ -43,11 +47,19 @@ object WakeTrigger {
         }
 
     /**
-     * 统一触发：有 RECORD_AUDIO 权限 → 启动 FairyOverlayService 直接录音；
-     * 无权限 → 拉起 MainActivity 请求授权（授权后 onRequestPermissionsResult 继续）。
-     * 后台启动 FGS 受限（如个别 Android 15+ 无障碍路径）→ 捕获并回退拉起 MainActivity。
+     * 统一触发（磁贴/实体键/通知栏共用）：
+     * 1. 录音中 → 停止录音（再按一次停止）；
+     * 2. 空闲且有 RECORD_AUDIO 权限 → 启动 FairyOverlayService 直接录音；
+     * 3. 无权限 → 拉起 MainActivity 请求授权（授权后 onRequestPermissionsResult 继续）；
+     * 4. 后台启动 FGS 受限（冷启动时 TileService 等非豁免组件）→ 捕获并回退拉起 MainActivity，
+     *    由前台 Activity 再启动服务（此时 FGS 启动合法，录音才能真实开始）。
      */
     fun trigger(context: Context) {
+        // M4-1.3.1：再按一次 = 停止录音
+        if (VoiceController.currentState == VoiceController.State.RECORDING) {
+            VoiceController.stopRecording()
+            return
+        }
         val granted = ContextCompat.checkSelfPermission(
             context, android.Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -61,6 +73,7 @@ object WakeTrigger {
             }
             ContextCompat.startForegroundService(context, intent)
         } catch (e: Exception) {
+            // TileService 等非豁免组件冷启动 FGS 受限：降级由前台 Activity 启动
             context.startActivity(wakeIntent(context))
         }
     }
