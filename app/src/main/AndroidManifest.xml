@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
     <!-- M4 语音闭环预留 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- M4-1.3.9：前台服务声明 microphone 类型需对应权限（API 34+ 强制） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <application
         android:name=".FairyVoiceApp"
@@ -45,11 +47,13 @@
             android:foregroundServiceType="dataSync" />
 
         <!-- M4-1.2：悬浮窗 + 录音 + 流体云/Live Updates 前台服务（随「启动连接」常驻，
-             唤醒时通过 action 控制，避免后台启动 FGS 限制） -->
+             唤醒时通过 action 控制，避免后台启动 FGS 限制）
+             M4-1.3.9：加入 microphone 类型——后台唤醒录音时系统按前台服务授予麦克风访问，
+             否则「仅使用中允许」权限下 AudioRecord 能创建但只能采到静音（录了没声） -->
         <service
             android:name=".service.FairyOverlayService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|microphone" />
 
         <service
             android:name=".wake.WakeKeyService"

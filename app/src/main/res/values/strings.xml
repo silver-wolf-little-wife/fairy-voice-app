@@ -27,6 +27,7 @@
     <string name="share_log_title">分享诊断日志</string>
     <string name="share_log_empty">还没有诊断日志</string>
     <string name="overlay_no_speech">未检测到语音</string>
+    <string name="overlay_mic_foreground_hint">麦克风权限为「仅使用中允许」，后台唤醒无法录音，请在应用设置中改为「始终允许」</string>
     <string name="voice_state_idle">空闲</string>
     <string name="voice_state_recording">录音中…</string>
     <string name="voice_state_recognizing">识别中…</string>

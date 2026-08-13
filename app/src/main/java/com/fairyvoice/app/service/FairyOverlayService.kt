@@ -19,6 +19,7 @@
  */
 package com.fairyvoice.app.service
 
+import android.app.AppOpsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -33,6 +34,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
+import android.os.Process
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
@@ -131,9 +133,33 @@ class FairyOverlayService : Service() {
             startActivity(WakeTrigger.wakeIntent(this))
             return
         }
+        // M4-1.3.9：「仅使用中允许」权限下后台唤醒录音会被系统静音（AudioRecord
+        // 能创建但采不到声音），检测到直接引导改权限，不空录
+        if (isMicForegroundOnly()) {
+            LogFile.d("Overlay.handleWake mic=foregroundOnly -> hint")
+            val hint = getString(R.string.overlay_mic_foreground_hint)
+            showCard(hint)
+            if (shouldPublishLive()) updateLiveNotification(hint, null)
+            scheduleHide(ERROR_SHOW_MS)
+            return
+        }
         // M4-1.3：按所选形态显示，二选一
         if (shouldShowOverlay()) showOverlay()
         VoiceController.startWake(this)
+    }
+
+    /** M4-1.3.9：检测 RECORD_AUDIO 是否为「仅使用中允许」——App 在后台时系统会静默拒麦，
+     * 表现为 checkSelfPermission 返回已授权、AudioRecord 正常创建但采到全静音。 */
+    private fun isMicForegroundOnly(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
+        return try {
+            val am = getSystemService(APP_OPS_SERVICE) as AppOpsManager
+            am.unsafeCheckOpNoThrow(
+                AppOpsManager.OPSTR_RECORD_AUDIO, Process.myUid(), packageName
+            ) == AppOpsManager.MODE_FOREGROUND
+        } catch (_: Throwable) {
+            false
+        }
     }
 
     private fun hideAll() {
@@ -354,7 +380,11 @@ class FairyOverlayService : Service() {
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(FG_NOTIFY_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            // M4-1.3.9：声明 microphone 类型，后台录音才能获得麦克风访问
+            startForeground(
+                FG_NOTIFY_ID, notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            )
         } else {
             startForeground(FG_NOTIFY_ID, notification)
         }
