@@ -20,6 +20,12 @@ object Prefs {
     const val KEY_ASK_TIMEOUT_MS = "ask_timeout_ms"
     const val KEY_WAKE_COMBO = "wake_combo"
 
+    /** M4-1.3：胶囊呈现形态（悬浮窗 / 流体云 / 智能），见 OVERLAY_MODE_*。 */
+    const val KEY_OVERLAY_MODE = "overlay_mode"
+    const val OVERLAY_MODE_AUTO = "auto"
+    const val OVERLAY_MODE_OVERLAY = "overlay"
+    const val OVERLAY_MODE_LIVE = "live"
+
     const val COMBO_VOL_UP_DOWN = "vol_up+vol_down"
     const val COMBO_VOL_UP_LONG = "vol_up_long"
 
@@ -44,5 +50,6 @@ object Prefs {
         KEY_HEARTBEAT_MS to "15000",
         KEY_ASK_TIMEOUT_MS to "60000",
         KEY_WAKE_COMBO to COMBO_VOL_UP_DOWN,
+        KEY_OVERLAY_MODE to OVERLAY_MODE_AUTO,
     )
 }

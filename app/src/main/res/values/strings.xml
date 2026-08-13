@@ -27,7 +27,7 @@
     <string name="voice_state_recognizing">识别中…</string>
     <string name="voice_state_waiting_ai">等待 Fairy…</string>
     <string name="voice_state_speaking">播报中…</string>
-    <string name="record_hint">M4-1：按音量上+音量下（或点上方按钮）开始录音，再按一次停止。16kHz/16bit/单声道 WAV，15 秒自动停止。录音存在应用私有目录（文件管理器无法直接访问），录完点「分享录音」可导出到文件管理/微信等验证。</string>
+    <string name="record_hint">M4-1：按音量上+音量下（或点上方按钮）开始录音，再按一次停止。16kHz/16bit/单声道 WAV。说话结束后自动停止（静音 1.2 秒），最长 15 秒兜底。录音存在应用私有目录（文件管理器无法直接访问），录完点「分享录音」可导出到文件管理/微信等验证。</string>
 
     <string name="section_test">M3 联调：发送测试指令</string>
     <string name="hint_ask_input">输入要发给 Fairy 的指令…</string>
@@ -65,6 +65,13 @@
     <string name="overlay_btn_close">收起</string>
     <string name="overlay_copied">已复制到剪贴板</string>
     <string name="overlay_permission_hint">建议开启悬浮窗权限：唤醒时显示胶囊与 AI 回复卡片（未开启则通过通知/流体云呈现）</string>
+
+    <!-- M4-1.3：胶囊形态选择（悬浮窗 / 流体云二选一，避免同时出现两个胶囊） -->
+    <string name="section_overlay_mode">胶囊形态</string>
+    <string name="overlay_mode_auto">智能（有悬浮窗权限用悬浮窗，否则流体云）</string>
+    <string name="overlay_mode_overlay">悬浮窗（自绘胶囊 + 卡片）</string>
+    <string name="overlay_mode_live">流体云（系统 Live Updates 胶囊 + 卡片）</string>
+    <string name="overlay_mode_hint">唤醒时只显示一种胶囊；修改即时生效。</string>
 
     <string name="accessibility_description">用于监听音量键组合，实现 Fairy Voice 的实体键唤醒（仅识别音量上+音量下同时按下，不拦截任何按键）</string>
 </resources>

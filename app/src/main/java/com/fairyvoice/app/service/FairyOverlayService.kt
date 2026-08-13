@@ -8,8 +8,14 @@
  *    系统自动以状态栏胶囊 + 展开卡片形态展示（点击卡片即回复文字），非 QPR1 设备降级普通通知；
  * 3. 唤醒链路：ACTION_FAIRY_OVERLAY_WAKE → VoiceController.startWake（录音 → 占位 ASR → ask → 回复）。
  *
+ * M4-1.3：新增「胶囊形态」配置（Prefs.KEY_OVERLAY_MODE），悬浮窗 / 流体云二选一，
+ * 避免唤醒时两个胶囊同时出现：
+ * - overlay：只显示自绘悬浮胶囊 + 卡片，不发布 Live Update 状态通知；
+ * - live：只发布 Live Update（系统胶囊 + 卡片），不显示悬浮窗；
+ * - auto：有悬浮窗权限 → 悬浮窗，否则流体云（默认）。
+ *
  * 服务随「启动连接」常驻（前台场景启动，规避后台启动 FGS 限制）；空闲时仅保留前台通知，
- * 不显示悬浮球；录音/回复期间才显示悬浮窗并发布 Live Update 通知。
+ * 不显示悬浮球；录音/回复期间才按所选形态显示胶囊并发布 Live Update 通知。
  */
 package com.fairyvoice.app.service
 
@@ -42,6 +48,7 @@ import androidx.core.content.ContextCompat
 import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.R
 import com.fairyvoice.app.audio.VoiceController
+import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.WakeTrigger
 import java.io.File
 
@@ -87,6 +94,26 @@ class FairyOverlayService : Service() {
         super.onDestroy()
     }
 
+    // ---------- 胶囊形态（M4-1.3） ----------
+
+    private fun readOverlayMode(): String =
+        Prefs.get(this).getString(Prefs.KEY_OVERLAY_MODE, Prefs.OVERLAY_MODE_AUTO)
+            ?: Prefs.OVERLAY_MODE_AUTO
+
+    /** 是否显示自绘悬浮胶囊。 */
+    private fun shouldShowOverlay(): Boolean = when (readOverlayMode()) {
+        Prefs.OVERLAY_MODE_OVERLAY -> true
+        Prefs.OVERLAY_MODE_LIVE -> false
+        else -> Settings.canDrawOverlays(this)
+    }
+
+    /** 是否发布 Live Update（流体云）状态通知。 */
+    private fun shouldPublishLive(): Boolean = when (readOverlayMode()) {
+        Prefs.OVERLAY_MODE_LIVE -> true
+        Prefs.OVERLAY_MODE_OVERLAY -> false
+        else -> !Settings.canDrawOverlays(this)
+    }
+
     // ---------- 唤醒 / 隐藏 ----------
 
     private fun handleWake() {
@@ -97,8 +124,8 @@ class FairyOverlayService : Service() {
             startActivity(WakeTrigger.wakeIntent(this))
             return
         }
-        // 悬浮窗权限有则显示胶囊；没有则仅靠 Live Update 通知呈现（降级路径）
-        if (Settings.canDrawOverlays(this)) showOverlay()
+        // M4-1.3：按所选形态显示，二选一
+        if (shouldShowOverlay()) showOverlay()
         VoiceController.startWake(this)
     }
 
@@ -123,11 +150,11 @@ class FairyOverlayService : Service() {
                     VoiceController.State.IDLE -> return@post
                 }
                 capsule?.text = text
-                updateLiveNotification(text, null)
+                if (shouldPublishLive()) updateLiveNotification(text, null)
             }
         }
 
-        override fun onRecorded(file: File) {
+        override fun onRecorded(file: File, hadSpeech: Boolean) {
             // startWake 内部继续走 ASR 占位 → ask，无需处理
         }
 
@@ -135,7 +162,7 @@ class FairyOverlayService : Service() {
             uiHandler.post {
                 lastReply = text
                 showCard(text)
-                updateLiveNotification(getString(R.string.overlay_reply_title), text)
+                if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_reply_title), text)
                 scheduleHide(REPLY_SHOW_MS)
             }
         }
@@ -143,7 +170,7 @@ class FairyOverlayService : Service() {
         override fun onError(e: Exception) {
             uiHandler.post {
                 showCard("${getString(R.string.overlay_error)}：${e.message}")
-                updateLiveNotification(getString(R.string.overlay_error), e.message)
+                if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_error), e.message)
                 scheduleHide(ERROR_SHOW_MS)
             }
         }
@@ -187,7 +214,9 @@ class FairyOverlayService : Service() {
     }
 
     private fun showCard(text: String) {
-        if (overlayRoot == null && Settings.canDrawOverlays(this)) showOverlay()
+        // M4-1.3：仅悬浮窗形态显示悬浮卡片；live 形态由流体云系统卡片承接
+        if (!shouldShowOverlay()) return
+        if (overlayRoot == null) showOverlay()
         cardText?.text = text
         capsule?.visibility = View.GONE
         card?.visibility = View.VISIBLE

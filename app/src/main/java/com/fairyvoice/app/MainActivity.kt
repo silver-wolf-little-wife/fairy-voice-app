@@ -1,10 +1,12 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+﻿// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * 主界面：B 端连接配置 + 状态 + M3 联调（手动输入指令触发 ask）+ 唤醒引导。
  * M4-1：唤醒/按钮触发录音（VoiceController），运行时请求 RECORD_AUDIO 权限。
  * M4-1.1：唤醒改 Intent action 驱动（不再依赖动态广播），新增录音分享导出。
  * M4-1.2：唤醒不再拉起全屏 App——统一走 FairyOverlayService（悬浮窗/流体云 + 录音 + AI 回复卡片），
  *         仅权限缺失时经本页授权；新增悬浮窗权限引导与 POST_PROMOTED_NOTIFICATIONS（Live Updates）请求。
+ * M4-1.3：新增「胶囊形态」三选一（悬浮窗/流体云/智能，二选一避免同时出现两个胶囊）；
+ *         FLAG_EXCLUDE_FROM_RECENTS 双保险隐藏最近任务（Manifest excludeFromRecents 已设）。
  */
 package com.fairyvoice.app
 
@@ -22,6 +24,7 @@ import android.provider.Settings
 import android.service.quicksettings.TileService
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -51,6 +54,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etAskInput: EditText
     private lateinit var btnRecordTest: Button
     private lateinit var btnShareRecord: Button
+    private lateinit var rgOverlayMode: RadioGroup
 
     /** 最近一次完成的录音文件（供「分享录音」导出）。 */
     private var lastRecordedFile: File? = null
@@ -79,7 +83,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { updateVoiceUi() }
         }
 
-        override fun onRecorded(file: File) {
+        override fun onRecorded(file: File, hadSpeech: Boolean) {
             runOnUiThread {
                 lastRecordedFile = file
                 // 16kHz/16bit/单声道 = 32000 B/s，44 字节为 WAV 头
@@ -88,8 +92,9 @@ class MainActivity : AppCompatActivity() {
                 val kb = file.length() / 1024.0
                 tvReply.text = String.format(
                     Locale.US,
-                    "录音完成：%s（%.1f 秒 / %.0f KB）\n点「分享录音」可导出到文件管理/微信等",
+                    "录音完成：%s（%.1f 秒 / %.0f KB）%s\n点「分享录音」可导出到文件管理/微信等",
                     file.name, seconds, kb,
+                    if (hadSpeech) "" else "（未检测到语音）",
                 )
                 Toast.makeText(this@MainActivity, "录音已保存", Toast.LENGTH_SHORT).show()
             }
@@ -109,6 +114,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // M4-1.3：双保险隐藏最近任务（Manifest excludeFromRecents 已设，此处运行时再打一次标记）
+        intent?.addFlags(0x08000000 /* FLAG_EXCLUDE_FROM_RECENTS */)
         setContentView(R.layout.activity_main)
 
         tvStatus = findViewById(R.id.tvStatus)
@@ -121,6 +128,7 @@ class MainActivity : AppCompatActivity() {
         etAskInput = findViewById(R.id.etAskInput)
         btnRecordTest = findViewById(R.id.btnRecordTest)
         btnShareRecord = findViewById(R.id.btnShareRecord)
+        rgOverlayMode = findViewById(R.id.rgOverlayMode)
 
         loadPrefsIntoUi()
 
@@ -133,6 +141,16 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnAddTile).setOnClickListener { onAddTileClick() }
         btnRecordTest.setOnClickListener { onRecordTestClick() }
         btnShareRecord.setOnClickListener { onShareRecordClick() }
+
+        // M4-1.3：胶囊形态选择（悬浮窗 / 流体云 / 智能），修改即存
+        rgOverlayMode.setOnCheckedChangeListener { _, checkedId ->
+            val mode = when (checkedId) {
+                R.id.rbOverlayOverlay -> Prefs.OVERLAY_MODE_OVERLAY
+                R.id.rbOverlayLive -> Prefs.OVERLAY_MODE_LIVE
+                else -> Prefs.OVERLAY_MODE_AUTO
+            }
+            Prefs.get(this).edit().putString(Prefs.KEY_OVERLAY_MODE, mode).apply()
+        }
 
         VoiceController.addListener(voiceListener)
         updateVoiceUi()
@@ -170,6 +188,7 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
+        intent?.addFlags(0x08000000 /* FLAG_EXCLUDE_FROM_RECENTS */)
         if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
             handleWake()
         }
@@ -342,6 +361,12 @@ class MainActivity : AppCompatActivity() {
         etToken.setText(p.getString(Prefs.KEY_TOKEN, ""))
         etDeviceId.setText(p.getString(Prefs.KEY_DEVICE_ID, "android-phone"))
         etHeartbeat.setText((p.getLong(Prefs.KEY_HEARTBEAT_MS, 15_000L) / 1000).toString())
+        // M4-1.3：胶囊形态回显
+        when (p.getString(Prefs.KEY_OVERLAY_MODE, Prefs.OVERLAY_MODE_AUTO)) {
+            Prefs.OVERLAY_MODE_OVERLAY -> rgOverlayMode.check(R.id.rbOverlayOverlay)
+            Prefs.OVERLAY_MODE_LIVE -> rgOverlayMode.check(R.id.rbOverlayLive)
+            else -> rgOverlayMode.check(R.id.rbOverlayAuto)
+        }
     }
 
     private fun saveUiToPrefs() {
@@ -395,3 +420,4 @@ class MainActivity : AppCompatActivity() {
         private const val WAV_HEADER_SIZE = 44L
     }
 }
+

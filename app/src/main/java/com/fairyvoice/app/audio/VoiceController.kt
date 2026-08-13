@@ -5,6 +5,8 @@
  * M4-1 只实现「录音」段（IDLE ↔ RECORDING）。
  * M4-1.2 增加 [startWake] 唤醒链路：录音完成 → RECOGNIZING（ASR 未接，用占位文本）
  * → WAITING_AI（sendAsk）→ onReply / onError，支撑悬浮窗/流体云卡片显示 AI 回复。
+ * M4-1.3 录音改静音自动停止（AudioRecorder 内置 VAD，说话结束 1.2s 自动停）；
+ * 未检测到语音或录音过短视为无效唤醒，不再走 ask 链路。
  * RECOGNIZING / WAITING_AI / SPEAKING 为 M4-2 起的 ASR/TTS 预留。
  * 回调在录音/请求线程触发，Listener 实现方自行切主线程。
  *
@@ -28,13 +30,16 @@ object VoiceController {
 
     interface Listener {
         fun onStateChanged(state: State)
-        fun onRecorded(file: File)
+        fun onRecorded(file: File, hadSpeech: Boolean)
         fun onReply(text: String) {}
         fun onError(e: Exception)
     }
 
     /** M4-2 ASR 接入点：当前录音完成后直接发这条占位文本走 ask 链路，验证悬浮窗/卡片交互。 */
     const val ASR_PLACEHOLDER_TEXT = "你好"
+
+    /** 有效语音最小 PCM 时长（0.4s @16kHz/16bit 单声道），低于视为误触。 */
+    private const val MIN_SPEECH_BYTES = 0.4 * 16000 * 2
 
     @Volatile
     private var state = State.IDLE
@@ -59,7 +64,7 @@ object VoiceController {
         if (state == State.RECORDING) stopRecording() else startRecording(context, autoAsk = false)
     }
 
-    /** M4-1.2 唤醒链路：开始录音，录音完成后自动走 ASR 占位文本 → ask → onReply。 */
+    /** M4-1.2 唤醒链路：开始录音，检测到有效语音后自动走 ASR 占位文本 → ask → onReply。 */
     fun startWake(context: Context) {
         startRecording(context, autoAsk = true)
     }
@@ -80,11 +85,15 @@ object VoiceController {
                     // 状态已在 startRecording 中置为 RECORDING
                 }
 
-                override fun onStop(file: File) {
+                override fun onStop(file: File, hadSpeech: Boolean) {
                     synchronized(lock) { recorder = null }
                     setState(State.IDLE)
-                    notifyRecorded(file)
-                    if (autoAsk) askWithPlaceholder()
+                    notifyRecorded(file, hadSpeech)
+                    // M4-1.3：无语音 / 录音过短视为无效唤醒，不进 ask 链路
+                    val pcm = file.length() - WAV_HEADER_SIZE
+                    if (autoAsk && hadSpeech && pcm >= MIN_SPEECH_BYTES.toLong()) {
+                        askWithPlaceholder()
+                    }
                 }
 
                 override fun onError(e: Exception) {
@@ -131,8 +140,8 @@ object VoiceController {
         for (l in listeners) l.onStateChanged(s)
     }
 
-    private fun notifyRecorded(file: File) {
-        for (l in listeners) l.onRecorded(file)
+    private fun notifyRecorded(file: File, hadSpeech: Boolean) {
+        for (l in listeners) l.onRecorded(file, hadSpeech)
     }
 
     private fun notifyReply(text: String) {
@@ -142,4 +151,6 @@ object VoiceController {
     private fun notifyError(e: Exception) {
         for (l in listeners) l.onError(e)
     }
+
+    private const val WAV_HEADER_SIZE = 44L
 }
