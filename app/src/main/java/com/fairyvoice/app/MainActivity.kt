@@ -69,6 +69,13 @@ class MainActivity : AppCompatActivity() {
     /** M4-1.2：RECORD_AUDIO 授权后继续唤醒链路（悬浮窗录音）而非录音测试。 */
     private var pendingWake = false
 
+    /**
+     * M4-1.3.6：冷启动/后台复用唤醒——窗口就绪（获焦）提前触发，超时兜底。
+     * ColorOS 上 onCreate 阶段 requestPermissions 弹窗会被吞；热启动后台场景
+     * onWindowFocusChanged 也可能不触发，因此保留 500ms 延迟兜底。
+     */
+    private var wakeTask: Runnable? = null
+
     /** 前台时每 2s 轮询连接状态，让「连接中 → 已连接/失败」自动刷新，无需重进页面。 */
     private val statusHandler = Handler(Looper.getMainLooper())
     private val statusPoll = object : Runnable {
@@ -163,10 +170,10 @@ class MainActivity : AppCompatActivity() {
         // post 到主线程（onResume 后执行），确保 Activity 已前台，FGS 启动合法。
         statusHandler.post { autoConnectIfNeeded() }
 
-        // 冷启动唤醒：由带 WAKE action 的 Intent 直接拉起（磁贴/通知栏/音量键），
-        // 布局就绪后再触发录音；热启动（App 已在前台）走 onNewIntent。
+        // M4-1.3.6：冷启动唤醒（磁贴/通知栏/音量键拉起）挂起，窗口就绪后触发，
+        // 500ms 延迟兜底（onCreate 阶段 requestPermissions 在 ColorOS 上弹窗会被吞）。
         if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
-            statusHandler.post { handleWake() }
+            scheduleWake()
         }
     }
 
@@ -175,6 +182,14 @@ class MainActivity : AppCompatActivity() {
         statusHandler.removeCallbacks(statusPoll)
         statusHandler.post(statusPoll)
         refreshStatus()
+        // M4-1.3.6：窗口已就绪则提前触发（焦点回调可能不来，延迟任务兜底）
+        if (hasWindowFocus()) fireWakeNow()
+    }
+
+    /** M4-1.3.6：窗口就绪（获焦）即提前执行待处理唤醒，保证权限弹窗能正常显示。 */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) fireWakeNow()
     }
 
     override fun onPause() {
@@ -195,7 +210,8 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         intent?.addFlags(0x08000000 /* FLAG_EXCLUDE_FROM_RECENTS */)
         if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
-            handleWake()
+            // M4-1.3.6：可见时立即触发；不可见（后台复用）挂起等窗口就绪
+            if (hasWindowFocus()) handleWake() else scheduleWake()
         }
     }
 
@@ -223,6 +239,25 @@ class MainActivity : AppCompatActivity() {
     /** M4-1.2：唤醒 = 权限已授直接走悬浮窗链路；未授请求授权后继续。 */
     private fun handleWake() {
         requestRecordPermissionAndToggle(wake = true)
+    }
+
+    /** M4-1.3.6：挂起唤醒任务（窗口未就绪时先等，500ms 后兜底执行）。 */
+    private fun scheduleWake() {
+        wakeTask?.let { statusHandler.removeCallbacks(it) }
+        wakeTask = Runnable {
+            wakeTask = null
+            handleWake()
+        }
+        statusHandler.postDelayed(wakeTask!!, WAKE_DELAY_MS)
+    }
+
+    /** M4-1.3.6：窗口就绪（获焦/onResume）时提前执行待处理唤醒。 */
+    private fun fireWakeNow() {
+        if (wakeTask != null) {
+            wakeTask?.let { statusHandler.removeCallbacks(it) }
+            wakeTask = null
+            handleWake()
+        }
     }
 
     // ---------- 事件 ----------
@@ -449,6 +484,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val STATUS_POLL_MS = 2_000L
+        /** M4-1.3.6：唤醒任务兜底延迟（窗口就绪所需时间）。 */
+        private const val WAKE_DELAY_MS = 500L
         private const val RC_RECORD_AUDIO = 101
         private const val WAV_HEADER_SIZE = 44L
     }
