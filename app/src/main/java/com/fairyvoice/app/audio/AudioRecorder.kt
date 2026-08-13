@@ -145,6 +145,7 @@ class AudioRecorder(
                 raf.write(WavHeader.patch(WavHeader.build(0, sampleRate), dataSize))
             }
             running.set(false)
+            LogFile.d("AudioRec.stop pcm=$dataSize maxRms=${vad.maxRms} noiseFloor=${vad.noiseFloor} speech=${vad.hadSpeech}")
             cb.onStop(file, vad.hadSpeech)
         } catch (e: Exception) {
             running.set(false)
@@ -171,10 +172,14 @@ class AudioRecorder(
         private val calibFrames = ((noiseCalibMs / 50).coerceAtLeast(1)).toInt()
         private var frameCount = 0
         private var calibSum = 0.0
-        private var noiseFloor = 0.0
+        var noiseFloor = 0.0
+            private set
         private var silenceMs = 0L
         private var lastFrameAt = 0L
         var hadSpeech = false
+            private set
+        /** M4-1.3.8：本次录音最大 RMS（诊断用，判断是否真的采到声音）。 */
+        var maxRms = 0
             private set
 
         /** 返回 true 表示应停止录音。 */
@@ -195,6 +200,7 @@ class AudioRecorder(
                 return false
             }
 
+            if (rms > maxRms) maxRms = rms
             val threshold = maxOf(noiseFloor * 3.0, ABS_MIN_RMS).toInt()
             if (rms >= threshold) {
                 hadSpeech = true

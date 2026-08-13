@@ -172,6 +172,15 @@ class FairyOverlayService : Service() {
         }
 
         override fun onRecorded(file: File, hadSpeech: Boolean) {
+            if (!hadSpeech) {
+                // M4-1.3.8：无语音唤醒给用户明确反馈，避免「按了没反应」
+                uiHandler.post {
+                    LogFile.d("Overlay.noSpeech")
+                    if (shouldShowOverlay()) showCard(getString(R.string.overlay_no_speech))
+                    if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_no_speech), null)
+                    scheduleHide(ERROR_SHOW_MS)
+                }
+            }
             // startWake 内部继续走 ASR 占位 → ask，无需处理
         }
 
