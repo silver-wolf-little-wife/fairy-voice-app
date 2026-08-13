@@ -148,8 +148,8 @@ class FairyOverlayService : Service() {
                     VoiceController.State.WAITING_AI -> getString(R.string.overlay_waiting_ai)
                     VoiceController.State.SPEAKING -> getString(R.string.overlay_speaking)
                     VoiceController.State.IDLE -> {
-                        // M4-1.3.1锛氱姸鎬佺粨鏉熸竻鐞?Live Update锛堥槻銆屽綍闊充腑銆嶆畫鐣欏崱姝伙級锛宍r
-                        // 鎮诞鑳跺泭涓€骞堕殣钘忥紝鍥炲鍗＄墖鐢?onReply/onError 鎺ョ
+                        // M4-1.3.1：状态结束清理 Live Update（防「录音中」残留卡死），
+                        // 悬浮胶囊一并隐藏，回复卡片由 onReply/onError 接管
                         (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
                         capsule?.visibility = View.GONE
                         return@post

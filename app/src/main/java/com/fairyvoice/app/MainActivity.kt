@@ -1,4 +1,4 @@
-﻿// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-only
 /**
  * 主界面：B 端连接配置 + 状态 + M3 联调（手动输入指令触发 ask）+ 唤醒引导。
  * M4-1：唤醒/按钮触发录音（VoiceController），运行时请求 RECORD_AUDIO 权限。
@@ -7,6 +7,7 @@
  *         仅权限缺失时经本页授权；新增悬浮窗权限引导与 POST_PROMOTED_NOTIFICATIONS（Live Updates）请求。
  * M4-1.3：新增「胶囊形态」三选一（悬浮窗/流体云/智能，二选一避免同时出现两个胶囊）；
  *         FLAG_EXCLUDE_FROM_RECENTS 双保险隐藏最近任务（Manifest excludeFromRecents 已设）。
+ * M4-1.3.2：打开 App（磁贴冷启动 / 桌面图标）即自动尝试连接 B 端；唤醒链路兜底 try/catch。
  */
 package com.fairyvoice.app
 
@@ -158,6 +159,10 @@ class MainActivity : AppCompatActivity() {
         requestNotificationPermissionIfNeeded()
         refreshStatus()
 
+        // M4-1.3.2：打开即自动尝试连接 B 端（磁贴冷启动 / 桌面图标统一）。
+        // post 到主线程（onResume 后执行），确保 Activity 已前台，FGS 启动合法。
+        statusHandler.post { autoConnectIfNeeded() }
+
         // 冷启动唤醒：由带 WAKE action 的 Intent 直接拉起（磁贴/通知栏/音量键），
         // 布局就绪后再触发录音；热启动（App 已在前台）走 onNewIntent。
         if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
@@ -205,7 +210,7 @@ class MainActivity : AppCompatActivity() {
                 if (pendingWake) {
                     pendingWake = false
                     // 唤醒链路：不拉起全屏，直接走悬浮窗/流体云服务录音
-                    FairyOverlayService.startWake(this)
+                    startWakeSafely()
                 } else {
                     VoiceController.toggle(this)
                 }
@@ -248,6 +253,21 @@ class MainActivity : AppCompatActivity() {
         ConnectionService.stop(this)
         FairyOverlayService.stop(this)
         FairyClientHolder.clear()
+        refreshStatus()
+    }
+
+    /**
+     * M4-1.3.2：打开 App 自动尝试连接——已配置且未连接时启动 ConnectionService +
+     * 悬浮窗服务常驻；未配置过（serverUrl 空）则保持等待用户填写，不打扰。
+     */
+    private fun autoConnectIfNeeded() {
+        if (FairyClientHolder.client?.isConnected == true) return
+        val p = Prefs.get(this)
+        val serverUrl = p.getString(Prefs.KEY_SERVER_URL, "") ?: ""
+        if (serverUrl.isBlank()) return
+        startRequested = true
+        ConnectionService.start(this)
+        FairyOverlayService.ensureRunning(this)
         refreshStatus()
     }
 
@@ -319,19 +339,29 @@ class MainActivity : AppCompatActivity() {
     /**
      * M4-1.2：wake=true 时授权完成后继续唤醒链路（FairyOverlayService.startWake），
      * 录音测试（wake=false）走 VoiceController.toggle。
+     * M4-1.3.2：startWake 兜底 try/catch，FGS 启动异常不崩主线程。
      */
     private fun requestRecordPermissionAndToggle(wake: Boolean) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
         ) {
-            if (wake) FairyOverlayService.startWake(this) else VoiceController.toggle(this)
+            if (wake) startWakeSafely() else VoiceController.toggle(this)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             pendingWake = wake
             ActivityCompat.requestPermissions(
                 this, arrayOf(Manifest.permission.RECORD_AUDIO), RC_RECORD_AUDIO
             )
         } else {
-            if (wake) FairyOverlayService.startWake(this) else VoiceController.toggle(this)
+            if (wake) startWakeSafely() else VoiceController.toggle(this)
+        }
+    }
+
+    /** M4-1.3.2：启动悬浮窗服务并触发唤醒；异常时给出提示而非崩溃。 */
+    private fun startWakeSafely() {
+        try {
+            FairyOverlayService.startWake(this)
+        } catch (e: Exception) {
+            Toast.makeText(this, "唤醒服务启动失败：${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -411,7 +441,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestNotificationPermissionIfNeeded() {
-        // M4-1.3.1锛歐AKE 鍐峰惎鍔紙纾佽创/瀹炰綋閿敜璧凤級涓嶅脊閫氱煡鏉冮檺妗嗭紝閬垮厤鎵撴柇鍞ら啋閾捐矾
+        // M4-1.3.1：WAKE 冷启动（磁贴/实体键唤起）不弹通知权限框，避免打断唤醒链路
         if (intent?.action != WakeTrigger.ACTION_FAIRY_WAKE) {
             requestNotificationAndPromotedPermission()
         }
@@ -423,5 +453,3 @@ class MainActivity : AppCompatActivity() {
         private const val WAV_HEADER_SIZE = 44L
     }
 }
-
-

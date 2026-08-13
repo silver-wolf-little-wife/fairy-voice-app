@@ -111,12 +111,22 @@ object VoiceController {
         synchronized(lock) { recorder?.stop() }
     }
 
-    /** M4-1.2：录音完成 →（ASR 占位）→ sendAsk → onReply。未连接则报错。 */
+    /**
+     * M4-1.2：录音完成 →（ASR 占位）→ sendAsk → onReply。未连接则报错。
+     * M4-1.3.2：冷启动自动连接后 B 端 WebSocket 可能尚未就绪，最多等待
+     * [CONNECT_WAIT_MS] 再判定失败，避免「录音完但连接没跟上」的误报。
+     */
     private fun askWithPlaceholder() {
         Thread {
             setState(State.RECOGNIZING)
             try {
-                val client = FairyClientHolder.client
+                var client = FairyClientHolder.client
+                var waited = 0L
+                while ((client == null || !client.isConnected) && waited < CONNECT_WAIT_MS) {
+                    Thread.sleep(200)
+                    waited += 200
+                    client = FairyClientHolder.client
+                }
                 if (client == null || !client.isConnected) {
                     throw FairyVoiceException.NotConnected("未连接 B 端，先启动连接")
                 }
@@ -151,6 +161,9 @@ object VoiceController {
     private fun notifyError(e: Exception) {
         for (l in listeners) l.onError(e)
     }
+
+    /** M4-1.3.2：ask 前等待 B 端连接就绪的上限。 */
+    private const val CONNECT_WAIT_MS = 3_000L
 
     private const val WAV_HEADER_SIZE = 44L
 }
