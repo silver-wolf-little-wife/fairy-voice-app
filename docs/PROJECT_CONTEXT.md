@@ -1,7 +1,7 @@
 # Fairy Voice 项目全上下文（PROJECT CONTEXT）
 
 > **用途**：本文件用于在完全丢失上下文时，快速恢复对 Fairy Voice 双仓库项目的完整认知。
-> **最后核对时间**：2026-08-13 11:02（CST）
+> **最后核对时间**：2026-08-13 11:58（CST）
 > **核对人**：Fairy（配合程曦月开发）
 > **维护规则**：每次里程碑/关键修复后更新本文件；代码文件级说明若有变动，同步修订对应小节。
 
@@ -56,12 +56,13 @@
 | M1 协议定稿 | WS 协议 v1.0.0（hello/心跳/ask），文档写入 PROTOCOL.md | ✅ |
 | M2 B 端插件骨架 | WS 服务端、记忆策略、LLM 接入、tool_loop_agent、/fairy 命令 | ✅ |
 | M3 C 端语音终端骨架 | Android App：WS 客户端、前台服务、三路唤醒、手动输入联调 | ✅ 实机验证（android-phone 上线问答通） |
-| **M4 语音闭环** | 录音 / ASR / TTS / 完整链路 / 状态机 / 唤醒词预留 | 🔶 **进行中（M4-1 录音已完成）** |
+| **M4 语音闭环** | 录音 / ASR / TTS / 完整链路 / 状态机 / 唤醒词预留 | 🔶 **进行中（M4-1 录音已完成，M4-1.1 唤醒/分享修复已完成）** |
 | M5 打磨与安全 | TTS 设置、wss、Release 打包、开机自启 | ⬜ |
 
 ### M4 子任务清单（DEV_PLAN.md 原文）
 
 - [x] 录音（AudioRecord 16kHz/16bit/单声道 → WAV）← **M4-1，已完成 2026-08-13**
+- [x] ~~磁贴/通知栏唤醒点击无反应、磁贴常亮~~ ← **M4-1.1 修复（Intent action 驱动 + 恒 INACTIVE），2026-08-13**
 - [ ] 语音识别（本地 whisper.cpp/faster-whisper 或云端 ASR API）← M4-2
 - [ ] TTS 播报（Android 系统 TTS 或 edge-tts/云端 TTS）← M4-3
 - [ ] 完整链路：触发 → 录音 → 识别 → WS 发送 → AI 回复 → TTS 播报
@@ -109,7 +110,8 @@
 ### 4.4 service/ConnectionService.kt
 - **职责**：常驻前台服务，持有客户端，通知栏显示状态 + 「唤醒」按钮。
 - onStartCommand 读取 Prefs → `FairyClientHolder.createOrGet` → `start()`；`START_STICKY` 保证被杀后重启。
-- 前台通知：`FOREGROUND_SERVICE_TYPE_DATA_SYNC`（API 29+ 用带 type 的 startForeground）；小图标 `ic_menu_compass`；「唤醒」按钮 = PendingIntent 拉起 MainActivity（**不用广播**，广播在 App 后台无人接收）。
+- 前台通知：`FOREGROUND_SERVICE_TYPE_DATA_SYNC`（API 29+ 用带 type 的 startForeground）；小图标 `ic_menu_compass`；「唤醒」按钮 = PendingIntent 拉起 MainActivity。
+- **⚠️ M4-1.1 修复**：唤醒 PendingIntent 改用 `WakeTrigger.wakeIntent()`（带 `ACTION_FAIRY_WAKE`）。原实现 Intent 无 action，MainActivity.onNewIntent 识别不了 → 点击无反应。
 - M4 挂接点：状态机后续建议挂在此服务（M4-6）。
 
 ### 4.5 util/Prefs.kt
@@ -117,33 +119,41 @@
 - 键：KEY_SERVER_URL / KEY_TOKEN / KEY_DEVICE_ID / KEY_HEARTBEAT_MS / KEY_ASK_TIMEOUT_MS / KEY_WAKE_COMBO（唤醒组合，vol_up+vol_down 或 vol_up_long）。
 
 ### 4.6 wake/WakeKeyService.kt（含 WakeTrigger）
-- **WakeTrigger**（统一唤醒入口，磁贴/无障碍/通知按钮共用）：`trigger()` = 拉起 MainActivity + 广播 `com.fairyvoice.app.action.WAKE`；录音由 MainActivity.handleWake 接起（M4-1 行为，见 4.8）。
+- **WakeTrigger**（统一唤醒入口，磁贴/无障碍/通知按钮共用）：
+  - `wakeIntent(context)`：构造带 `action=ACTION_FAIRY_WAKE` + `FLAG_ACTIVITY_NEW_TASK|SINGLE_TOP` 的 MainActivity Intent。
+  - `trigger(context)`：`startActivity(wakeIntent(context))`。
+  - **⚠️ M4-1.1 修复**：旧实现「startActivity（无 action）+ sendBroadcast」双通道——Intent 无 action 导致热启动 onNewIntent 识别不了；广播在 App 冷启动时无人接收。现统一由 Intent action 驱动 onCreate/onNewIntent 直接触发录音，**已彻底移除广播**（防止热启动双触发导致「开始立刻停止」）。
 - WakeKeyService：无障碍服务，监听音量键组合（默认音量上+下 0.5s），**不消费按键事件**（onKeyEvent 恒返回 false，音量调节不受影响）；2s 防抖；onInterrupt/onDestroy 清理。
 - **⚠️ 边界**：电源键事件被系统独占，任何第三方 APP 无法监听（无 root 无解）；息屏时收不到任何按键事件。
 
 ### 4.7 wake/FairyVoiceTileService.kt
 - **职责**：控制中心磁贴（OPPO 无系统级按键映射 ROM 的替代唤醒入口）。
-- 点击 → `WakeTrigger.trigger(this)`；锁屏态不响应（`isLocked`）；onStartListening 更新磁贴状态（已连接=STATE_ACTIVE +「已连接」，否则「点击唤醒」）。
+- **⚠️ M4-1.1 修复**：
+  1. **磁贴是「动作按钮」不是开关**：恒 `STATE_INACTIVE`（暗态可点击），连接状态只放副标题（「已连接 · 点击唤醒」/「点击唤醒」）。旧实现连接成功即设 STATE_ACTIVE，用户看到「一直亮着」且误以为不可点。
+  2. **点击唤醒**：`startActivityAndCollapse(WakeTrigger.wakeIntent(this))` 拉起主界面并收起控制中心；API 28+ 用 PendingIntent 变体（Intent 变体在 API 34 弃用），API 26/27 走旧接口（@Suppress 去警告）。
+- 锁屏态（isLocked）不响应，防误触。
 
 ### 4.8 MainActivity.kt
-- **职责**：连接配置 UI + 状态轮询 + M3 联调入口（手动输入指令触发 ask）+ M4-1 录音测试入口 + 唤醒引导。
+- **职责**：连接配置 UI + 状态轮询 + M3 联调入口（手动输入指令触发 ask）+ M4-1 录音测试入口 + M4-1.1 录音分享 + 唤醒引导。
 - 关键点：
   - 前台每 2s 轮询刷新连接状态（statusPoll），无需重进页面。
-  - `onResume` 动态注册 wake 广播必须 `RECEIVER_NOT_EXPORTED`（**targetSdk 34+ 必须显式声明 exported 标志，否则 SecurityException 启动即崩**）。
-  - singleTask 模式：后台唤醒走 `onNewIntent`（动态 receiver 可能未就绪，双保险）。
+  - singleTask 模式：后台唤醒走 `onNewIntent`；**冷启动唤醒在 onCreate 检查 `intent.action == ACTION_FAIRY_WAKE` 后 post handleWake**（M4-1.1 新增，广播已删，两条路径都靠 Intent action）。
+  - **M4-1.1 已移除动态广播 receiver**（wakeReceiver 及其 onResume/onPause 注册注销）——广播与 onNewIntent 双触发会导致 toggle 两次（开始立刻停止）。
   - Android 13+ 请求 POST_NOTIFICATIONS 运行时权限；点「启动连接」时才请求。
   - **M4-1 `handleWake()`** = 请求 RECORD_AUDIO 运行时权限（API 23+）→ `VoiceController.toggle(this)`（录音中再按一次=停止）；权限被拒 Toast 提示。onRequestPermissionsResult(RC_RECORD_AUDIO=101) 授权后 `startRecording`。
-  - **M4-1 录音测试按钮** `btnRecordTest`：与唤醒同走 `requestRecordPermissionAndToggle`；`tvVoiceState` 显示状态机当前态；`tvReply` 回显录音文件路径/失败原因。
-  - `voiceListener`（VoiceController.Listener）在 onCreate 注册、onDestroy 注销，回调统一 runOnUiThread。
+  - **M4-1 录音测试按钮** `btnRecordTest`：与唤醒同走 `requestRecordPermissionAndToggle`；`tvVoiceState` 显示状态机当前态。
+  - **M4-1.1 录音结果回显**：onRecorded 显示 `文件名（X.X 秒 / Y KB）`（WAV 头 44 字节，32000 B/s 换算时长），供用户不导出也能确认录音非空。
+  - **M4-1.1 分享按钮** `btnShareRecord`：FileProvider 授权 URI（authority=`${applicationId}.fileprovider`，白名单 `res/xml/file_paths.xml` 仅 recordings/）+ `ACTION_SEND`（type audio/wav）走系统分享面板，可导出到文件管理/微信/电脑。`lastRecordedFile` 记录最近一次录音。
   - onSendAskClick：开 Thread 调 `client.sendAsk`（阻塞调用不能放主线程）。
 
 ### 4.9 FairyVoiceApp.kt
 - **职责**：全局 Application，兜底捕获未处理异常写入 `crash_log.txt`（filesDir），不吞异常，落盘后仍交给系统。
 
 ### 4.10 资源与布局
-- `res/layout/activity_main.xml`：ScrollView + LinearLayout，深色主题（fairy_bg #0F1B2D，fairy_blue #4FC3F7），从上到下：标题 → 状态 → B 端连接配置（地址/token/设备ID/心跳）→ 启动/停止 → **M4 录音区（按钮+状态+说明，M4-1 新增）** → M3 联调区（输入框+发送+回复回显）→ 唤醒方式（无障碍按钮+说明）→ 控制中心磁贴（添加按钮+说明）。
-- `res/values/strings.xml`：全部文案（含 M4 录音区与状态机文案）。
+- `res/layout/activity_main.xml`：ScrollView + LinearLayout，深色主题（fairy_bg #0F1B2D，fairy_blue #4FC3F7），从上到下：标题 → 状态 → B 端连接配置（地址/token/设备ID/心跳）→ 启动/停止 → **M4 录音区（录音按钮 + 分享按钮 + 状态 + 说明，M4-1/M4-1.1）** → M3 联调区（输入框+发送+回复回显）→ 唤醒方式（无障碍按钮+说明）→ 控制中心磁贴（添加按钮+说明）。
+- `res/values/strings.xml`：全部文案（含 M4 录音区、分享、磁贴副标题文案）。
 - `res/xml/accessibility_service_config.xml`：无障碍服务配置（flagDefault|flagRequestFilterKeyEvents、canRequestFilterKeyEvents=true，仅 typeWindowStateChanged）。
+- `res/xml/file_paths.xml`（M4-1.1 新增）：FileProvider 白名单，仅 `files-path recordings/`。
 
 ### 4.11 测试（app/src/test/java/com/fairyvoice/app/）
 - `protocol/ProtocolTest.kt`：7 用例，帧构造与解析（含垃圾输入安全解析）。
@@ -162,7 +172,7 @@
 ### 4.13 audio/ 模块（M4-1 新增，语音链路）
 - **audio/WavHeader.kt**：44 字节 RIFF/WAVE 头生成，纯 Kotlin 无 Android 依赖（JVM 单测）。`build(dataSize, sampleRate=16000, channels=1, bitsPerSample=16)` 生成头；`patch(header, dataSize)` 录制结束后回填 data size。
 - **audio/AudioRecorder.kt**：AudioRecord 录音循环（16kHz/16bit/单声道）。先写 44 字节头占位 → 流式写 PCM（单线程 executor `fairy-audio-rec`）→ 结束回填 WAV 头。默认 15 秒时长上限自动停止；start/stop 幂等；回调 onStart/onStop(file)/onError。权限由调用方保证。
-- **audio/VoiceController.kt**：语音链路状态机控制器（单例 object）。`State{IDLE, RECORDING, RECOGNIZING, WAITING_AI, SPEAKING}`（M4-1 只实现 IDLE↔RECORDING，其余为 ASR/TTS 预留）；`toggle(context)` 统一入口（录音中=停止，空闲=开始）；录音文件 `filesDir/recordings/fairy_yyyyMMdd_HHmmss.wav`；Listener{onStateChanged/onRecorded/onError} 回调在录音线程触发。
+- **audio/VoiceController.kt**：语音链路状态机控制器（单例 object）。`State{IDLE, RECORDING, RECOGNIZING, WAITING_AI, SPEAKING}`（M4-1 只实现 IDLE↔RECORDING，其余为 ASR/TTS 预留）；`toggle(context)` 统一入口（录音中=停止，空闲=开始）；录音文件 `filesDir/recordings/fairy_yyyyMMdd_HHmmss.wav`；Listener{onStateChanged/onRecorded/onError} 回调在录音线程触发。**注意：filesDir 为应用私有沙盒，文件管理器不可直接访问，导出走 MainActivity 分享按钮（FileProvider）**。
 
 ---
 
@@ -256,7 +266,7 @@ gradlew.bat testDebugUnitTest          # 18 用例（协议7 + 客户端5 + WAV�
 gradlew.bat assembleDebug              # 产物 app/build/outputs/apk/debug/app-debug.apk
 ```
 - 环境：Android SDK 位于 `C:\Users\13370\AppData\Local\Android\Sdk`（platforms + build-tools 已装）；**系统 PATH 无 java/JAVA_HOME**，构建必须显式指定 JDK。可用 JDK：`C:\Users\13370\.jdks\jbr-21.0.11`（**推荐**，Gradle 8.9 支持）；Android Studio JBR 与 PyCharm JBR 均为 Java 25，**不可用**（报 `25.0.2` 版本错误）。
-- 已构建产物：`app-debug.apk` 约 8.3MB（2026-08-13 11:01，M4-1）。
+- 已构建产物：`app-debug.apk` 约 8.3MB（2026-08-13 11:56，M4-1.1）。
 - 安装：`adb install -r app/build/outputs/apk/debug/app-debug.apk`。
 
 ### B 端（fairy-voice）
@@ -271,9 +281,8 @@ python tests/test_ws_smoke.py      # WS 冒烟（7 场景，起服 8877）
 1. B 端插件在 AstrBot 中加载，配置 ws_port/auth_token。
 2. App 填 `ws://<B端IP>:<port>/ws` + token + 设备 ID，点「启动连接」。
 3. 通知栏出现常驻通知即连接成功；输入框发 ask 看回复（M3 联调入口）。
-4. 唤醒：无障碍音量键组合 / 控制中心磁贴 / 通知栏按钮。
-5. **M4-1 录音验证**：点「开始录音（测试）」或按音量上+下 → 状态变「录音中…」→ 再按一次停止 → tvReply 显示 WAV 路径；可用 adb 拉出文件验听：
-   `adb pull /sdcard/Android/data/com.fairyvoice.app/files/recordings/ xxx.wav`
+4. 唤醒：无障碍音量键组合 / 控制中心磁贴 / 通知栏按钮（**M4-1.1 起三路均直接开始/停止录音**）。
+5. **M4-1 录音验证**：点「开始录音（测试）」或任意唤醒 → 状态变「录音中…」→ 再按一次停止 → tvReply 显示「文件名（X.X 秒 / Y KB）」→ 点「分享录音」导出到文件管理/微信验听。
 
 ---
 
@@ -282,7 +291,7 @@ python tests/test_ws_smoke.py      # WS 冒烟（7 场景，起服 8877）
 1. **✅ 已解决（M4-1 提交）**：`usesCleartextTraffic="true"` 改动此前一直未提交（targetSdk 28+ 默认禁明文，不开则 ws:// 被 OkHttp 直接拒绝、无限重连卡「连接中」），已随 M4-1 一并提交。
 2. `build*.log`（含历史 build.log/build.err.log 与临时构建日志）已被 .gitignore 忽略，勿参考其内容（均为已修复的历史失败）。
 3. ws:// 明文依赖 usesCleartextTraffic；生产建议 wss。
-4. Android 14+ 动态注册广播必须 RECEIVER_NOT_EXPORTED，否则启动即崩。
+4. Android 14+ 动态注册广播必须 RECEIVER_NOT_EXPORTED，否则启动即崩（M4-1.1 已删掉该广播，此坑仅历史）。
 5. 重复 start() 必须幂等（FairyVoiceClient 已用 loopRunning CAS 处理，勿破坏）。
 6. 配置变更必须重建客户端（FairyClientHolder.createOrGet 已处理）。
 7. 电源键无法被第三方监听（系统独占），息屏无法音量键唤醒；OPPO 无「电源键+音量上」映射任意 App 能力（详见 C 端 docs/WAKEUP.md）。
@@ -293,20 +302,30 @@ python tests/test_ws_smoke.py      # WS 冒烟（7 场景，起服 8877）
 12. **⚠️ 重连语义（M4-1 修复）**：FairyVoiceClient 握手期间连接断开/超时 = 瞬时故障（静默退避重试），只有 ack.ok=false 才触发 onAuthError。测试重连用例必须「先回 ack 再断开」，否则第二次 onReady 不会发生。
 13. **录音权限**：RECORD_AUDIO 运行时权限由 MainActivity 请求（RC_RECORD_AUDIO=101）；后台唤醒路径（磁贴/通知栏）会先拉起 MainActivity 再申请，勿在 Service/Tile 里直接 startRecording（无 Activity 上下文无法弹权限框）。
 14. AudioRecord 本身无法 JVM 单测，M4-1 只测了 WAV 头纯逻辑；录音链路需真机冒烟（见第 7 节联调步骤 5）。
+15. **⚠️ 唤醒必须由 Intent action 驱动（M4-1.1 修复）**：WakeTrigger.wakeIntent 带 `ACTION_FAIRY_WAKE`，MainActivity 靠 onCreate（冷启动）/onNewIntent（热启动）识别。**勿退回「无 action 的 startActivity + 广播」方案**——那是「点击无反应」的根因；也勿让广播与 onNewIntent 并存（双触发 = 开始立刻停止）。
+16. **磁贴是动作按钮**：恒 STATE_INACTIVE（暗态可点击），连接状态只放副标题，勿再按连接状态切 STATE_ACTIVE（用户会误以为「一直亮着」是异常）。
+17. **FileProvider**：authority 固定 `${applicationId}.fileprovider`（= com.fairyvoice.app.fileprovider）；白名单 file_paths.xml 仅 recordings/，加新导出目录需同步更新。
+18. **录音文件在应用私有沙盒**（filesDir/recordings），文件管理器不可直接访问，属正常现象；导出走「分享录音」（ACTION_SEND + FileProvider）。真机 adb 验证：`adb pull /sdcard/Android/data/com.fairyvoice.app/files/recordings/ xxx.wav`。
 
 ---
 
-## 9. M4-1 实施总结（2026-08-13，已完成）
+## 9. M4-1 / M4-1.1 实施总结（2026-08-13，已完成）
 
-**任务**（DEV_PLAN.md M4 第一条）：录音（AudioRecord 16kHz/16bit/单声道 → WAV）。
+**M4-1 任务**（DEV_PLAN.md M4 第一条）：录音（AudioRecord 16kHz/16bit/单声道 → WAV）。
 
-### 交付内容
+### M4-1 交付内容
 - **新包 `audio/`**：`WavHeader.kt`（WAV 头纯逻辑，JVM 单测 6 用例）+ `AudioRecorder.kt`（录音循环，15s 上限，单线程 executor，幂等 start/stop）+ `VoiceController.kt`（语音链路状态机，IDLE↔RECORDING 已实现，其余状态为 M4-2 预留）。
-- **唤醒接入**：MainActivity.handleWake 改为「请求 RECORD_AUDIO → toggle 录音（再按一次停止）」；WakeTrigger 本身不变（仍拉起界面+广播）。
-- **UI**：新增 M4 录音区（开始/停止按钮 + 状态文本 + 说明），录音结果/错误回显 tvReply。
+- **唤醒接入**：MainActivity.handleWake = 「请求 RECORD_AUDIO → toggle 录音（再按一次停止）」；WakeTrigger 触发。
+- **UI**：M4 录音区（开始/停止按钮 + 状态文本 + 说明），录音结果/错误回显 tvReply。
 - **顺带修复**：FairyVoiceClient 握手断开误报 onAuthError（改静默重试）；FairyVoiceClientTest 重连用例设计缺陷（先回 ack 再断开）；构建 JDK 定位（jbr-21.0.11）。
 - **验证**：单测 18/18 通过；assembleDebug 成功（APK 8.3MB）。
-- **待真机验证**：实际录音 → WAV 可播放（16kHz/16bit/单声道）、唤醒链路录音起停、15s 自动停止。
+
+### M4-1.1 修复（2026-08-13，真机反馈驱动）
+- **问题 1：磁贴/通知栏唤醒点击无反应**。根因：WakeTrigger 的 Intent 没带 WAKE action（onNewIntent 识别不了），且广播在冷启动时无人接收。修复：Intent 统一带 `ACTION_FAIRY_WAKE`，MainActivity onCreate（冷启动 post handleWake）/onNewIntent（热启动）直接触发；**移除广播**；通知栏 PendingIntent 改走 wakeIntent；磁贴用 startActivityAndCollapse（API 28+ PendingIntent 变体）。
+- **问题 2：磁贴连接后一直亮**。根因：onStartListening 按连接状态设 STATE_ACTIVE。修复：磁贴是「动作按钮」恒 STATE_INACTIVE，连接状态放副标题（「已连接 · 点击唤醒」/「点击唤醒」）。
+- **问题 3：录音文件在沙盒无法访问**。修复：onRecorded 回显「文件名（时长 / 大小）」即时确认非空；新增「分享录音」按钮（FileProvider + ACTION_SEND）导出到文件管理/微信等。
+- **验证**：构建零警告，单测 18/18，assembleDebug 成功（APK 8.3MB，11:56）。
+- **待真机验证**：三路唤醒（音量键/磁贴/通知栏）点击即录音、再按即停止；磁贴恒暗态、副标题随连接状态变化；录完分享导出 WAV 可播放；15s 自动停止。
 
 ### 后续任务链（M4-2 起）
 ASR（本地 whisper 或云端 API）→ TTS（系统 TTS 或 edge-tts）→ 完整链路（VoiceController 扩展 RECOGNIZING/WAITING_AI/SPEAKING 流转）+ 状态机 UI/通知栏展示 → M5 打磨。

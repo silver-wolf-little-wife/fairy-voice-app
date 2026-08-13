@@ -21,6 +21,7 @@ import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.R
 import com.fairyvoice.app.protocol.FairyVoiceClient
 import com.fairyvoice.app.util.Prefs
+import com.fairyvoice.app.wake.WakeTrigger
 
 class ConnectionService : Service() {
 
@@ -69,13 +70,11 @@ class ConnectionService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        // 「唤醒」按钮：直接拉起主界面，而不是发广播。
-        // 原实现用 getBroadcast + 动态注册的 receiver，App 不在前台时广播无人接收导致无反应。
+        // 「唤醒」按钮：直接拉起主界面，Intent 带 WAKE action（M4-1.1 修复，
+        // 原实现无 action 导致 onNewIntent 识别不了、点击无反应）。
         val wakePi = PendingIntent.getActivity(
             this, 1,
-            Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            },
+            WakeTrigger.wakeIntent(this),
             PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)

@@ -19,12 +19,15 @@
     <string name="section_m4_record">M4 语音：录音</string>
     <string name="btn_record_start">开始录音（测试）</string>
     <string name="btn_record_stop">停止录音</string>
+    <string name="btn_share_record">分享录音</string>
+    <string name="share_record_title">分享录音文件</string>
+    <string name="share_record_empty">还没有可分享的录音</string>
     <string name="voice_state_idle">空闲</string>
     <string name="voice_state_recording">录音中…</string>
     <string name="voice_state_recognizing">识别中…</string>
     <string name="voice_state_waiting_ai">等待 Fairy…</string>
     <string name="voice_state_speaking">播报中…</string>
-    <string name="record_hint">M4-1：按音量上+音量下（或点上方按钮）开始录音，再按一次停止。16kHz/16bit/单声道 WAV，15 秒自动停止，保存到 filesDir/recordings。</string>
+    <string name="record_hint">M4-1：按音量上+音量下（或点上方按钮）开始录音，再按一次停止。16kHz/16bit/单声道 WAV，15 秒自动停止。录音存在应用私有目录（文件管理器无法直接访问），录完点「分享录音」可导出到文件管理/微信等验证。</string>
 
     <string name="section_test">M3 联调：发送测试指令</string>
     <string name="hint_ask_input">输入要发给 Fairy 的指令…</string>
@@ -38,7 +41,8 @@
     <string name="btn_add_tile">添加到控制中心</string>
     <string name="tile_hint">下拉通知栏 → 点右上角编辑（铅笔图标）→ 把 Fairy Voice 拖入常用磁贴；点击磁贴即唤醒。Android 13+ 可先点上方按钮请求系统弹出添加入口。</string>
     <string name="tile_label">Fairy Voice</string>
-    <string name="tile_subtitle_connected">已连接</string>
+    <!-- 磁贴是动作按钮：恒暗态可点击，连接状态只放副标题（M4-1.1） -->
+    <string name="tile_subtitle_connected">已连接 · 点击唤醒</string>
     <string name="tile_subtitle_idle">点击唤醒</string>
 
     <string name="notification_channel_name">Fairy Voice 连接</string>

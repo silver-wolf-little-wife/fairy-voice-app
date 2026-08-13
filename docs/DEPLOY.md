@@ -32,18 +32,22 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## 验证清单（对应 DEV_PLAN 验收标准）
 
 - [ ] WS 断线 15 秒内自动重连（指数退避 1s→60s），重连后状态恢复
-- [ ] 音量上+音量下 0.5s 唤醒（亮屏任意界面）
+- [ ] 音量上+音量下 0.5s 唤醒（亮屏任意界面）→ 直接开始录音
+- [ ] 控制中心磁贴点击 → 收起面板 + 开始录音；磁贴恒暗态（副标题显示「已连接 · 点击唤醒」/「点击唤醒」）
+- [ ] 通知栏「唤醒」按钮 → 开始录音
 - [ ] ask → response 链路（单测覆盖 5 用例 + 真机输入框联调）
 - [ ] 握手 token 错误 → `onAuthError` 提示，不崩溃
 - [ ] 常驻内存占用（M3 骨架 < 100MB，M4 录音后观察）
-- [ ] M4-1 录音：按唤醒键/录音按钮 → 状态「录音中…」→ 再按一次停止 → 生成 WAV
+- [ ] M4-1 录音：按唤醒键/录音按钮 → 状态「录音中…」→ 再按一次停止 → 界面显示「文件名（时长/大小）」
 - [ ] M4-1 录音产物可播放（16kHz/16bit/单声道），15 秒自动停止
+- [ ] M4-1.1 分享：录完点「分享录音」→ 系统分享面板导出 WAV 到文件管理/微信，可正常播放
 - [ ] 无 RECORD_AUDIO 权限时弹权限框，拒绝后 Toast 提示不崩溃
 
 ## M4 状态
 
 - **M4-1 录音已完成（2026-08-13）**：`audio/` 包（WavHeader/AudioRecorder/VoiceController），
-  唤醒/按钮触发录音，RECORD_AUDIO 运行时权限，录音存 `filesDir/recordings/`。
-  真机冒烟：点「开始录音（测试）」→ 说话 → 停止 → `adb pull` 验听。
+  唤醒/按钮触发录音，RECORD_AUDIO 运行时权限，录音存 `filesDir/recordings/`（私有沙盒）。
+- **M4-1.1 唤醒与分享修复（2026-08-13）**：三路唤醒统一改 Intent action 驱动（修复点击无反应）；
+  磁贴恒暗态（连接状态放副标题）；新增「分享录音」导出（FileProvider + ACTION_SEND）。
 - M4-2 起：ASR 识别（VoiceController 扩展 RECOGNIZING 流转）→ TTS 播报 →
   完整链路 + 状态机 UI/通知栏展示（状态枚举已就位）。

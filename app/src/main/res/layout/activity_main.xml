@@ -114,6 +114,13 @@
             android:layout_marginTop="8dp"
             android:text="@string/btn_record_start" />
 
+        <Button
+            android:id="@+id/btnShareRecord"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/btn_share_record" />
+
         <TextView
             android:id="@+id/tvVoiceState"
             android:layout_width="match_parent"

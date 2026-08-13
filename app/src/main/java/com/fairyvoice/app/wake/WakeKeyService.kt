@@ -21,17 +21,26 @@ import android.view.accessibility.AccessibilityEvent
 import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.util.Prefs
 
-/** 统一唤醒入口：磁贴、无障碍服务、通知栏按钮共用。 */
+/**
+ * 统一唤醒入口：磁贴、无障碍服务、通知栏按钮共用。
+ *
+ * ⚠️ M4-1.1 修复：旧实现「startActivity + 动态广播」双通道，但 Intent 没带
+ * ACTION_FAIRY_WAKE，导致 onNewIntent 识别不了（App 已在前台时点击无反应）；
+ * 而广播在 App 冷启动时无人接收。现统一改为「Intent 带 action」驱动
+ * MainActivity.onCreate/onNewIntent 直接触发录音，不再依赖广播。
+ */
 object WakeTrigger {
     const val ACTION_FAIRY_WAKE = "com.fairyvoice.app.action.WAKE"
 
-    fun trigger(context: Context) {
-        // M3：唤醒 = 拉起主界面并广播（M4 在此挂接"开始录音"）
-        val intent = Intent(context, MainActivity::class.java).apply {
+    /** 唤醒主界面用的 Intent：带 WAKE action，保证冷启动 onCreate / 热启动 onNewIntent 都能识别。 */
+    fun wakeIntent(context: Context): Intent =
+        Intent(context, MainActivity::class.java).apply {
+            action = ACTION_FAIRY_WAKE
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
-        context.startActivity(intent)
-        context.sendBroadcast(Intent(ACTION_FAIRY_WAKE))
+
+    fun trigger(context: Context) {
+        context.startActivity(wakeIntent(context))
     }
 }
 

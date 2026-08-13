@@ -2,16 +2,15 @@
 /**
  * 主界面：B 端连接配置 + 状态 + M3 联调（手动输入指令触发 ask）+ 唤醒引导。
  * M4-1：唤醒/按钮触发录音（VoiceController），运行时请求 RECORD_AUDIO 权限。
+ * M4-1.1：唤醒改 Intent action 驱动（不再依赖动态广播），新增录音分享导出。
  */
 package com.fairyvoice.app
 
 import android.Manifest
 import android.app.Activity
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -26,6 +25,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.protocol.FairyVoiceException
 import com.fairyvoice.app.service.ConnectionService
@@ -34,6 +34,7 @@ import com.fairyvoice.app.wake.FairyVoiceTileService
 import com.fairyvoice.app.wake.WakeTrigger
 import com.fairyvoice.app.wake.WakeKeyService
 import java.io.File
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -46,6 +47,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etHeartbeat: EditText
     private lateinit var etAskInput: EditText
     private lateinit var btnRecordTest: Button
+    private lateinit var btnShareRecord: Button
+
+    /** 最近一次完成的录音文件（供「分享录音」导出）。 */
+    private var lastRecordedFile: File? = null
 
     /**
      * 用户已点击「启动连接」但 ConnectionService 尚未创建 client 时（startForegroundService
@@ -62,14 +67,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val wakeReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
-                runOnUiThread { handleWake() }
-            }
-        }
-    }
-
     /** M4-1：录音状态/结果回显（回调在录音线程，统一切主线程）。 */
     private val voiceListener = object : VoiceController.Listener {
         override fun onStateChanged(state: VoiceController.State) {
@@ -78,7 +75,16 @@ class MainActivity : AppCompatActivity() {
 
         override fun onRecorded(file: File) {
             runOnUiThread {
-                tvReply.text = "录音完成：${file.absolutePath}"
+                lastRecordedFile = file
+                // 16kHz/16bit/单声道 = 32000 B/s，44 字节为 WAV 头
+                val dataSize = (file.length() - WAV_HEADER_SIZE).coerceAtLeast(0L)
+                val seconds = dataSize / 32000.0
+                val kb = file.length() / 1024.0
+                tvReply.text = String.format(
+                    Locale.US,
+                    "录音完成：%s（%.1f 秒 / %.0f KB）\n点「分享录音」可导出到文件管理/微信等",
+                    file.name, seconds, kb,
+                )
                 Toast.makeText(this@MainActivity, "录音已保存", Toast.LENGTH_SHORT).show()
             }
         }
@@ -104,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         etHeartbeat = findViewById(R.id.etHeartbeat)
         etAskInput = findViewById(R.id.etAskInput)
         btnRecordTest = findViewById(R.id.btnRecordTest)
+        btnShareRecord = findViewById(R.id.btnShareRecord)
 
         loadPrefsIntoUi()
 
@@ -115,22 +122,23 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btnAddTile).setOnClickListener { onAddTileClick() }
         btnRecordTest.setOnClickListener { onRecordTestClick() }
+        btnShareRecord.setOnClickListener { onShareRecordClick() }
 
         VoiceController.setListener(voiceListener)
         updateVoiceUi()
 
         requestNotificationPermissionIfNeeded()
         refreshStatus()
+
+        // 冷启动唤醒：由带 WAKE action 的 Intent 直接拉起（磁贴/通知栏/音量键），
+        // 布局就绪后再触发录音；热启动（App 已在前台）走 onNewIntent。
+        if (intent?.action == WakeTrigger.ACTION_FAIRY_WAKE) {
+            statusHandler.post { handleWake() }
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        // Android 14+ (targetSdk 34) 动态注册广播必须显式声明 exported 标志，
-        // 否则抛 SecurityException 导致启动即崩。ACTION_FAIRY_WAKE 为应用内广播，用 NOT_EXPORTED。
-        val filter = IntentFilter(WakeTrigger.ACTION_FAIRY_WAKE)
-        ContextCompat.registerReceiver(
-            this, wakeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
         statusHandler.removeCallbacks(statusPoll)
         statusHandler.post(statusPoll)
         refreshStatus()
@@ -139,7 +147,6 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         statusHandler.removeCallbacks(statusPoll)
-        runCatching { unregisterReceiver(wakeReceiver) }
     }
 
     override fun onDestroy() {
@@ -148,8 +155,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * singleTask 模式：App 已在后台/栈内时，磁贴/通知栏唤醒走 onNewIntent。
-     * 此时动态注册的 receiver 可能尚未就绪，直接在这里处理，保证唤醒稳定。
+     * singleTask 模式：App 已在栈内/前台时，磁贴/通知栏唤醒走 onNewIntent。
+     * Intent 由 WakeTrigger.wakeIntent 构造（带 ACTION_FAIRY_WAKE），直接触发录音。
      */
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
@@ -251,6 +258,22 @@ class MainActivity : AppCompatActivity() {
         requestRecordPermissionAndToggle()
     }
 
+    /** M4-1.1：分享最近一次录音（FileProvider 授权 URI，系统分享面板导出）。 */
+    private fun onShareRecordClick() {
+        val file = lastRecordedFile
+        if (file == null || !file.exists()) {
+            Toast.makeText(this, getString(R.string.share_record_empty), Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.share_record_title)))
+    }
+
     private fun requestRecordPermissionAndToggle() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
@@ -328,5 +351,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val STATUS_POLL_MS = 2_000L
         private const val RC_RECORD_AUDIO = 101
+        private const val WAV_HEADER_SIZE = 44L
     }
 }
