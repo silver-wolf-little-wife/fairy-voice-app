@@ -7,14 +7,16 @@
  */
 package com.fairyvoice.app
 
+import java.util.concurrent.CopyOnWriteArrayList
+
 enum class ChatSender { USER, FAIRY }
 
 data class ChatMessage(val text: String, val sender: ChatSender)
 
 object ChatHistory {
-    val messages = mutableListOf<ChatMessage>()
+    /** 线程安全列表：服务层（VoiceController 线程）写入 + 主线程（RecyclerView）读取并发安全。 */
+    val messages: MutableList<ChatMessage> = CopyOnWriteArrayList()
 
-    @Synchronized
     fun add(text: String, sender: ChatSender) {
         messages.add(ChatMessage(text, sender))
     }
