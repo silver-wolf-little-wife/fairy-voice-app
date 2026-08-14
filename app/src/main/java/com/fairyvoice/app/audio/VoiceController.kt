@@ -16,6 +16,8 @@
 package com.fairyvoice.app.audio
 
 import android.content.Context
+import com.fairyvoice.app.ChatHistory
+import com.fairyvoice.app.ChatSender
 import com.fairyvoice.app.OneBotHolder
 import com.fairyvoice.app.util.LogFile
 import com.fairyvoice.app.protocol.OneBotException
@@ -183,10 +185,13 @@ object VoiceController {
     }
 
     private fun notifyRecognized(text: String) {
+        // P3：写入全局历史，保证对话页未创建/后台时也记录（磁贴唤醒等场景）
+        ChatHistory.add(text, ChatSender.USER)
         for (l in listeners) l.onRecognized(text)
     }
 
     private fun notifyReply(text: String, recognized: String?) {
+        ChatHistory.add(text, ChatSender.FAIRY)
         for (l in listeners) l.onReply(text, recognized)
     }
 
@@ -199,6 +204,7 @@ object VoiceController {
     }
 
     private fun notifyPush(text: String) {
+        ChatHistory.add(text, ChatSender.FAIRY)
         for (l in listeners) l.onPush(text)
     }
 

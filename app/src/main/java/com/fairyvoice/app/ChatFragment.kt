@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
  * P3 对话页（千问风格）：聊天气泡 + 文本/语音输入。
- * - 语音：麦克风 → VoiceController.startWake（录音 → 本地 ASR → OneBot 上报 → 回复）
- * - 文本：直接 OneBotHolder.client.sendPrivateMessage
- * - 同时监听 VoiceController：onReply（语音回复）/ onPush（AstrBot 主动消息）/ onError
+ * 对话记录存全局 ChatHistory（VoiceController 服务层写入），对话页从历史加载，
+ * 因此磁贴/音量键等唤醒产生的对话即使本页未创建也能完整显示。
  */
 package com.fairyvoice.app
 
@@ -31,15 +30,11 @@ import java.io.File
 
 class ChatFragment : Fragment() {
 
-    enum class Sender { USER, FAIRY }
-
-    data class ChatMessage(val text: String, val sender: Sender)
-
     private lateinit var rvChat: RecyclerView
     private lateinit var etInput: EditText
     private lateinit var tvStatus: TextView
     private lateinit var tvState: TextView
-    private val messages = mutableListOf<ChatMessage>()
+    private val messages: MutableList<ChatMessage> get() = ChatHistory.messages
     private lateinit var adapter: ChatAdapter
 
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -69,23 +64,22 @@ class ChatFragment : Fragment() {
         }
 
         override fun onRecognized(text: String) {
-            // P3：识别完成立即显示用户气泡（不等 AI 回复）
-            uiHandler.post { addMessage(ChatMessage(text, Sender.USER)) }
+            // 历史已由 VoiceController 写入，这里只刷新 UI
+            uiHandler.post { notifyNewMessage() }
         }
 
         override fun onReply(text: String, recognized: String?) {
-            uiHandler.post {
-                // 语音链路：用户气泡已在 onRecognized 显示，这里只加 Fairy 回复
-                addMessage(ChatMessage(text, Sender.FAIRY))
-            }
+            uiHandler.post { notifyNewMessage() }
         }
 
         override fun onPush(text: String) {
-            uiHandler.post { addMessage(ChatMessage(text, Sender.FAIRY)) }
+            uiHandler.post { notifyNewMessage() }
         }
 
         override fun onError(e: Exception) {
-            uiHandler.post { addMessage(ChatMessage("出错了：${e.message}", Sender.FAIRY)) }
+            uiHandler.post {
+                addMessage("出错了：${e.message}", ChatSender.FAIRY)
+            }
         }
     }
 
@@ -105,10 +99,15 @@ class ChatFragment : Fragment() {
         adapter = ChatAdapter(messages)
         rvChat.layoutManager = LinearLayoutManager(requireContext())
         rvChat.adapter = adapter
+        // 加载历史后滚动到底
+        rvChat.post {
+            if (messages.isNotEmpty()) rvChat.scrollToPosition(messages.size - 1)
+        }
 
         btnSend.setOnClickListener { onSendClick() }
         btnMic.setOnClickListener { onMicClick() }
         etInput.setOnEditorActionListener { _, _, _ -> onSendClick(); true }
+        updateStateText()
         return v
     }
 
@@ -129,7 +128,7 @@ class ChatFragment : Fragment() {
         val text = etInput.text.toString().trim()
         if (text.isEmpty()) return
         etInput.setText("")
-        addMessage(ChatMessage(text, Sender.USER))
+        addMessage(text, ChatSender.USER)
         // 文字指令不走 VoiceController 状态机，手动更新左下角状态
         tvState.text = getString(R.string.voice_state_waiting_ai)
         Thread {
@@ -138,12 +137,12 @@ class ChatFragment : Fragment() {
                 if (client == null || !client.isConnected) throw OneBotException.NotConnected()
                 val reply = client.sendPrivateMessage(text)
                 uiHandler.post {
-                    addMessage(ChatMessage(reply, Sender.FAIRY))
+                    addMessage(reply, ChatSender.FAIRY)
                     updateStateText()
                 }
             } catch (e: Exception) {
                 uiHandler.post {
-                    addMessage(ChatMessage("失败：${e.message}", Sender.FAIRY))
+                    addMessage("失败：${e.message}", ChatSender.FAIRY)
                     updateStateText()
                 }
             }
@@ -166,8 +165,15 @@ class ChatFragment : Fragment() {
         }
     }
 
-    private fun addMessage(msg: ChatMessage) {
-        messages.add(msg)
+    /** 写全局历史 + 刷新 UI。 */
+    private fun addMessage(text: String, sender: ChatSender) {
+        ChatHistory.add(text, sender)
+        notifyNewMessage()
+    }
+
+    /** 历史已被服务层写入，仅刷新最后一条。 */
+    private fun notifyNewMessage() {
+        if (messages.isEmpty()) return
         adapter.notifyItemInserted(messages.size - 1)
         rvChat.scrollToPosition(messages.size - 1)
     }
@@ -199,7 +205,7 @@ class ChatFragment : Fragment() {
 }
 
 /** 聊天气泡适配器。 */
-class ChatAdapter(private val items: List<ChatFragment.ChatMessage>) :
+class ChatAdapter(private val items: List<ChatMessage>) :
     RecyclerView.Adapter<ChatAdapter.Holder>() {
 
     class Holder(v: View) : RecyclerView.ViewHolder(v) {
@@ -216,7 +222,7 @@ class ChatAdapter(private val items: List<ChatFragment.ChatMessage>) :
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val m = items[position]
         holder.bubble.text = m.text
-        if (m.sender == ChatFragment.Sender.USER) {
+        if (m.sender == ChatSender.USER) {
             holder.root.gravity = Gravity.END
             holder.bubble.setBackgroundResource(R.drawable.bubble_user)
         } else {
