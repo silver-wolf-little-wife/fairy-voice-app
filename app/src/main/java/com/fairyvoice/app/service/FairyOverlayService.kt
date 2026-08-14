@@ -272,10 +272,10 @@ class FairyOverlayService : Service() {
         capsule?.setOnClickListener { onCapsuleClick() }
         capsule?.let { makeDraggable(it) }
 
-        // P4：固定窗口宽度(280dp)，用 START 锚定 + 显式 x 居中（不依赖 WRAP_CONTENT 重测，
-        // 根治 ColorOS 上内容变化导致偏右/靠左）；胶囊/卡片在窗口内 center_horizontal 居中
+        // P4：窗口 WRAP_CONTENT（窗口=内容，触摸区域与显示一致，保证按钮可点），
+        // START 锚定 + 测量后显式 x 居中（规避 ColorOS CENTER_HORIZONTAL 偏右）
         val lp = WindowManager.LayoutParams(
-            dp(OVERLAY_WIDTH_DP),
+            WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
@@ -476,9 +476,14 @@ class FairyOverlayService : Service() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    /** 悬浮窗水平居中 x（基于固定窗口宽度 OVERLAY_WIDTH_DP，ColorOS 兼容）。 */
+    /** 悬浮窗水平居中 x：测量当前窗口内容宽度，显式计算居中（窗口=内容，触摸区域一致）。 */
     private fun centeredX(): Int {
-        val w = dp(OVERLAY_WIDTH_DP)
+        val root = overlayRoot ?: return 0
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        val w = root.measuredWidth
         return ((resources.displayMetrics.widthPixels - w) / 2).coerceAtLeast(0)
     }
 
@@ -490,7 +495,6 @@ class FairyOverlayService : Service() {
         private const val FG_NOTIFY_ID = 1001
         private const val NOTIFY_ID = 1002
         private const val OVERLAY_Y_DP = 140
-        private const val OVERLAY_WIDTH_DP = 280
         private const val REPLY_SHOW_MS = 20_000L
         private const val ERROR_SHOW_MS = 8_000L
         const val ACTION_HIDE = "com.fairyvoice.app.action.OVERLAY_HIDE"
