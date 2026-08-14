@@ -115,6 +115,9 @@ class ChatFragment : Fragment() {
         super.onResume()
         VoiceController.addListener(voiceListener)
         uiHandler.post(statusPoll)
+        // P3：回到前台全量刷新——后台期间（磁贴/音量键唤醒、主动推送）新增的全局历史显示出来
+        adapter.notifyDataSetChanged()
+        if (messages.isNotEmpty()) rvChat.scrollToPosition(messages.size - 1)
         updateStateText()
     }
 
