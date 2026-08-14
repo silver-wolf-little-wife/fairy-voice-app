@@ -17,16 +17,16 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import com.fairyvoice.app.FairyClientHolder
 import com.fairyvoice.app.MainActivity
+import com.fairyvoice.app.OneBotHolder
 import com.fairyvoice.app.R
-import com.fairyvoice.app.protocol.FairyVoiceClient
+import com.fairyvoice.app.protocol.OneBotClient
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.WakeTrigger
 
 class ConnectionService : Service() {
 
-    private var client: FairyVoiceClient? = null
+    private var client: OneBotClient? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -38,19 +38,19 @@ class ConnectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val p = Prefs.get(this)
-        val serverUrl = p.getString(Prefs.KEY_SERVER_URL, "") ?: ""
-        val token = p.getString(Prefs.KEY_TOKEN, "") ?: ""
-        val deviceId = p.getString(Prefs.KEY_DEVICE_ID, "android-phone") ?: "android-phone"
-        val heartbeat = p.getLong(Prefs.KEY_HEARTBEAT_MS, 15_000L)
-        val askTimeout = p.getLong(Prefs.KEY_ASK_TIMEOUT_MS, 60_000L)
+        // P1：OneBot 直连 AstrBot（aiocqhttp 反向 WS，默认端口 6199）
+        val astrbotUrl = p.getString(Prefs.KEY_ASTRBOT_URL, "ws://192.168.1.100:6199/ws") ?: ""
+        val token = p.getString(Prefs.KEY_ASTRBOT_TOKEN, "") ?: ""
+        val selfId = p.getString(Prefs.KEY_ONEBOT_SELF_ID, "10086") ?: "10086"
+        val userId = p.getString(Prefs.KEY_ONEBOT_USER_ID, "10001") ?: "10001"
 
-        client = FairyClientHolder.createOrGet(serverUrl, token, deviceId, heartbeat, askTimeout)
+        client = OneBotHolder.createOrGet(astrbotUrl, token, selfId, userId)
         client?.start()
         return START_STICKY
     }
 
     override fun onDestroy() {
-        FairyClientHolder.clear()
+        OneBotHolder.clear()
         super.onDestroy()
     }
 

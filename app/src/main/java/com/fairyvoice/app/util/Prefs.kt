@@ -20,6 +20,12 @@ object Prefs {
     const val KEY_ASK_TIMEOUT_MS = "ask_timeout_ms"
     const val KEY_WAKE_COMBO = "wake_combo"
 
+    // P1（OneBot 直连方案）：AstrBot 连接参数
+    const val KEY_ASTRBOT_URL = "astrbot_url"
+    const val KEY_ASTRBOT_TOKEN = "astrbot_token"
+    const val KEY_ONEBOT_SELF_ID = "onebot_self_id"
+    const val KEY_ONEBOT_USER_ID = "onebot_user_id"
+
     /** M4-1.3：胶囊呈现形态（悬浮窗 / 流体云 / 智能），见 OVERLAY_MODE_*。 */
     const val KEY_OVERLAY_MODE = "overlay_mode"
     const val OVERLAY_MODE_AUTO = "auto"
@@ -51,5 +57,10 @@ object Prefs {
         KEY_ASK_TIMEOUT_MS to "60000",
         KEY_WAKE_COMBO to COMBO_VOL_UP_DOWN,
         KEY_OVERLAY_MODE to OVERLAY_MODE_AUTO,
+        // P1：AstrBot OneBot 连接默认值（端口 6199 = aiocqhttp 默认 ws_reverse_port）
+        KEY_ASTRBOT_URL to "ws://192.168.1.100:6199/ws",
+        KEY_ASTRBOT_TOKEN to "",
+        KEY_ONEBOT_SELF_ID to "10086",
+        KEY_ONEBOT_USER_ID to "10001",
     )
 }

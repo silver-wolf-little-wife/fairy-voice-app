@@ -1,6 +1,6 @@
 # 新方案实施计划：C 端 OneBot V11 直连 + 本地 ASR（替代 B 端插件）
 
-> 状态：**P0 技术验证通过（2026-08-14）**，P1（OneBot 客户端）待开工
+> 状态：**P0、P1 已完成（2026-08-14）**，P2（本地 ASR）待开工
 > 核心思路：**砍掉自研 B 端插件（fairy-voice）**，C 端改造为最小 OneBot 11「反向 WebSocket」客户端，
 > 直接把 ASR 后的文本以私聊消息上报给 AstrBot 的 aiocqhttp（OneBot V11）适配器，走 AstrBot 原生 LLM/工具/会话链路；
 > 同时把 ASR 从 B 端（faster-whisper）移植到 C 端（sherpa-onnx 本地识别），实现全链路离线、数据不出手机。
@@ -155,12 +155,12 @@ OneBot 是异步消息模型。单用户场景下用**简化关联**：
 - [x] paraformer-zh-small 中文识别验证——**质量好**（测试集中文/中英混合精准）、推理 23ms/5.6s 音频、模型 74MB
 - 出口：全绿，可进入 P1
 
-### P1 OneBot 客户端（3~5 天）
-- [ ] `protocol/OneBotClient.kt`：反向 WS×2（复用 OkHttp）、token 鉴权、指数退避重连（复用现有骨架）、事件上报、API 请求分发/响应、pending 指令关联与超时
-- [ ] `protocol/OneBotFrame.kt`：事件/API 帧构造与解析，纯 JVM 可单测（对齐现有 Protocol.kt 风格）
-- [ ] `ConnectionService` 挂接 OneBotClient；`Prefs` 增加 astrbot host/port/token、user_id/self_id 配置
-- [ ] 配置 UI：主界面「B 端地址」区改为 AstrBot OneBot 连接参数
-- [ ] 单测：帧构造/解析、API 分发、pending 关联/超时（MockWebServer）
+### P1 OneBot 客户端（**已完成 2026-08-14**）
+- [x] `protocol/OneBotClient.kt`：**universal 单连接**（复用 OkHttp）、token 鉴权、指数退避重连、事件上报、API 请求分发/响应、pending 指令关联与超时
+- [x] `protocol/OneBotFrame.kt`：事件/API 帧构造与解析，纯 JVM 单测
+- [x] `ConnectionService` 挂接 OneBotClient；`Prefs` 增加 astrbot url/token、self_id/user_id 配置
+- [x] 配置 UI：主界面配置区改为 AstrBot OneBot 连接参数（地址/token/self_id/user_id）
+- [x] 单测：帧构造/解析、API 分发、pending 关联/超时、断线重连（MockWebServer）——`OneBotFrameTest` 9 例 + `OneBotClientTest` 7 例全绿，全量 39 例通过
 
 ### P2 本地 ASR（3~5 天）
 - [ ] sherpa-onnx AAR 集成、模型打包/懒加载

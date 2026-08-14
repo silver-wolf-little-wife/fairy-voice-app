@@ -58,20 +58,21 @@
             android:textColorHint="#80E1F5FE" />
 
         <EditText
-            android:id="@+id/etDeviceId"
+            android:id="@+id/etSelfId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="@string/label_device_id"
+            android:hint="@string/label_self_id"
+            android:inputType="number"
             android:textColor="@color/fairy_text"
             android:textColorHint="#80E1F5FE" />
 
         <EditText
-            android:id="@+id/etHeartbeat"
+            android:id="@+id/etUserId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="@string/label_heartbeat"
+            android:hint="@string/label_user_id"
             android:inputType="number"
             android:textColor="@color/fairy_text"
             android:textColorHint="#80E1F5FE" />

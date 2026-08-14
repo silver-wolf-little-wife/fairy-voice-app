@@ -33,7 +33,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.fairyvoice.app.audio.VoiceController
-import com.fairyvoice.app.protocol.FairyVoiceException
+import com.fairyvoice.app.protocol.OneBotException
 import com.fairyvoice.app.service.ConnectionService
 import com.fairyvoice.app.service.FairyOverlayService
 import com.fairyvoice.app.util.LogFile
@@ -51,8 +51,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvVoiceState: TextView
     private lateinit var etServerUrl: EditText
     private lateinit var etToken: EditText
-    private lateinit var etDeviceId: EditText
-    private lateinit var etHeartbeat: EditText
+    private lateinit var etSelfId: EditText
+    private lateinit var etUserId: EditText
     private lateinit var etAskInput: EditText
     private lateinit var btnRecordTest: Button
     private lateinit var btnShareRecord: Button
@@ -138,8 +138,8 @@ class MainActivity : AppCompatActivity() {
         tvVoiceState = findViewById(R.id.tvVoiceState)
         etServerUrl = findViewById(R.id.etServerUrl)
         etToken = findViewById(R.id.etToken)
-        etDeviceId = findViewById(R.id.etDeviceId)
-        etHeartbeat = findViewById(R.id.etHeartbeat)
+        etSelfId = findViewById(R.id.etSelfId)
+        etUserId = findViewById(R.id.etUserId)
         etAskInput = findViewById(R.id.etAskInput)
         btnRecordTest = findViewById(R.id.btnRecordTest)
         btnShareRecord = findViewById(R.id.btnShareRecord)
@@ -304,7 +304,7 @@ class MainActivity : AppCompatActivity() {
         startRequested = false
         ConnectionService.stop(this)
         FairyOverlayService.stop(this)
-        FairyClientHolder.clear()
+        OneBotHolder.clear()
         refreshStatus()
     }
 
@@ -313,10 +313,10 @@ class MainActivity : AppCompatActivity() {
      * 悬浮窗服务常驻；未配置过（serverUrl 空）则保持等待用户填写，不打扰。
      */
     private fun autoConnectIfNeeded() {
-        if (FairyClientHolder.client?.isConnected == true) return
+        if (OneBotHolder.client?.isConnected == true) return
         val p = Prefs.get(this)
-        val serverUrl = p.getString(Prefs.KEY_SERVER_URL, "") ?: ""
-        if (serverUrl.isBlank()) return
+        val astrbotUrl = p.getString(Prefs.KEY_ASTRBOT_URL, "") ?: ""
+        if (astrbotUrl.isBlank()) return
         startRequested = true
         ConnectionService.start(this)
         FairyOverlayService.ensureRunning(this)
@@ -345,23 +345,17 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "先输入指令文本", Toast.LENGTH_SHORT).show()
             return
         }
-        val client = FairyClientHolder.client
+        val client = OneBotHolder.client
         if (client == null || !client.isConnected) {
-            tvReply.text = "未连接 B 端，先启动连接"
+            tvReply.text = "未连接 AstrBot，先启动连接"
             return
         }
         tvReply.text = "等待 Fairy 回复…"
         Thread {
             try {
-                val resp = client.sendAsk(text, "zh-CN")
-                runOnUiThread {
-                    tvReply.text = if (resp.ok) {
-                        "Fairy：${resp.text ?: ""}"
-                    } else {
-                        "错误 [${resp.errorCode ?: "unknown"}]：${resp.errorMessage ?: ""}"
-                    }
-                }
-            } catch (e: FairyVoiceException) {
+                val reply = client.sendPrivateMessage(text)
+                runOnUiThread { tvReply.text = "Fairy：$reply" }
+            } catch (e: OneBotException) {
                 runOnUiThread { tvReply.text = "失败：${e.message}" }
             }
         }.start()
@@ -458,10 +452,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadPrefsIntoUi() {
         val p = Prefs.get(this)
-        etServerUrl.setText(p.getString(Prefs.KEY_SERVER_URL, ""))
-        etToken.setText(p.getString(Prefs.KEY_TOKEN, ""))
-        etDeviceId.setText(p.getString(Prefs.KEY_DEVICE_ID, "android-phone"))
-        etHeartbeat.setText((p.getLong(Prefs.KEY_HEARTBEAT_MS, 15_000L) / 1000).toString())
+        etServerUrl.setText(p.getString(Prefs.KEY_ASTRBOT_URL, "ws://192.168.1.100:6199/ws"))
+        etToken.setText(p.getString(Prefs.KEY_ASTRBOT_TOKEN, ""))
+        etSelfId.setText(p.getString(Prefs.KEY_ONEBOT_SELF_ID, "10086"))
+        etUserId.setText(p.getString(Prefs.KEY_ONEBOT_USER_ID, "10001"))
         // M4-1.3：胶囊形态回显
         when (p.getString(Prefs.KEY_OVERLAY_MODE, Prefs.OVERLAY_MODE_AUTO)) {
             Prefs.OVERLAY_MODE_OVERLAY -> rgOverlayMode.check(R.id.rbOverlayOverlay)
@@ -472,18 +466,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveUiToPrefs() {
         val p = Prefs.get(this).edit()
-        p.putString(Prefs.KEY_SERVER_URL, etServerUrl.text.toString().trim())
-        p.putString(Prefs.KEY_TOKEN, etToken.text.toString().trim())
-        p.putString(Prefs.KEY_DEVICE_ID, etDeviceId.text.toString().trim().ifEmpty { "android-phone" })
-        p.putLong(
-            Prefs.KEY_HEARTBEAT_MS,
-            (etHeartbeat.text.toString().toLongOrNull() ?: 15L).coerceAtLeast(1L) * 1000,
-        )
+        p.putString(Prefs.KEY_ASTRBOT_URL, etServerUrl.text.toString().trim())
+        p.putString(Prefs.KEY_ASTRBOT_TOKEN, etToken.text.toString().trim())
+        p.putString(Prefs.KEY_ONEBOT_SELF_ID, etSelfId.text.toString().trim().ifEmpty { "10086" })
+        p.putString(Prefs.KEY_ONEBOT_USER_ID, etUserId.text.toString().trim().ifEmpty { "10001" })
         p.apply()
     }
 
     private fun refreshStatus() {
-        val client = FairyClientHolder.client
+        val client = OneBotHolder.client
         tvStatus.text = when {
             client?.isConnected == true -> getString(R.string.status_connected)
             client != null || startRequested -> getString(R.string.status_connecting)
