@@ -9,3 +9,6 @@
 .externalNativeBuild/
 .cxx/
 build*.log
+# Release 签名 keystore（勿提交）
+app/*.jks
+app/*.keystore

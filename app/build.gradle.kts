@@ -23,9 +23,20 @@ android {
         }
     }
 
+    signingConfigs {
+        // M5 Release 签名（keystore 本地生成，已 gitignore，勿提交）
+        create("release") {
+            storeFile = file("fairy-release.jks")
+            storePassword = "fairyRelease2026"
+            keyAlias = "fairy"
+            keyPassword = "fairyRelease2026"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
