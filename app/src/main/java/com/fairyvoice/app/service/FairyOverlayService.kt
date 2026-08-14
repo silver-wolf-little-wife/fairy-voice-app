@@ -167,10 +167,7 @@ class FairyOverlayService : Service() {
         hideTask = null
         lastReply = null
         removeOverlay()
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        nm.cancel(NOTIFY_ID)
-        // M4-1.3.3：部分 ROM（ColorOS 流体云）取消 Live Update 有延迟，300ms 后二次兜底
-        uiHandler.postDelayed({ nm.cancel(NOTIFY_ID) }, 300)
+        cancelLiveNotify()
     }
 
     // ---------- VoiceController 回调（录音线程 → 切主线程） ----------
@@ -186,13 +183,18 @@ class FairyOverlayService : Service() {
                     VoiceController.State.SPEAKING -> getString(R.string.overlay_speaking)
                     VoiceController.State.IDLE -> {
                         // M4-1.3.1：状态结束清理 Live Update（防「录音中」残留卡死），
-                        // 悬浮胶囊一并隐藏，回复卡片由 onReply/onError 接管
-                        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFY_ID)
+                        // 二次兜底取消（ColorOS 流体云取消有延迟，见 hideAll）
+                        cancelLiveNotify()
                         capsule?.visibility = View.GONE
+                        card?.visibility = View.GONE
                         return@post
                     }
                 }
-                capsule?.text = text
+                // 进入活动状态：确保悬浮胶囊可见 + 文本随状态更新（防止从 GONE 恢复时不显示）
+                capsule?.apply {
+                    visibility = View.VISIBLE
+                    this.text = text
+                }
                 if (shouldPublishLive()) updateLiveNotification(text, null)
             }
         }
@@ -217,7 +219,11 @@ class FairyOverlayService : Service() {
                 // P2：悬浮卡片同时展示识别文本与 AI 回复
                 val display = if (recognized.isNullOrBlank()) text else "识别：$recognized\n$text"
                 showCard(display)
-                if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_reply_title), display)
+                if (shouldPublishLive()) {
+                    updateLiveNotification(getString(R.string.overlay_reply_title), display)
+                    // P3：回复到达时 heads-up 大横幅自动弹出（流体云胶囊之外的重要信息）
+                    showHeadsUp(display)
+                }
                 scheduleHide(REPLY_SHOW_MS)
             }
         }
@@ -258,7 +264,16 @@ class FairyOverlayService : Service() {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         runCatching { wm?.addView(root, lp) }.onFailure { return }
         overlayRoot = root
-        capsule?.text = getString(R.string.overlay_recording)
+        // 初始文本按当前状态显示（showCard 重建时不再误显「录音中」）
+        val stateText = when (VoiceController.currentState) {
+            VoiceController.State.RECOGNIZING -> getString(R.string.overlay_recognizing)
+            VoiceController.State.WAITING_AI -> getString(R.string.overlay_waiting_ai)
+            VoiceController.State.SPEAKING -> getString(R.string.overlay_speaking)
+            else -> getString(R.string.overlay_recording)
+        }
+        capsule?.text = stateText
+        capsule?.visibility = View.VISIBLE
+        card?.visibility = View.GONE
     }
 
     private fun removeOverlay() {
@@ -345,6 +360,28 @@ class FairyOverlayService : Service() {
         runCatching { nm.notify(NOTIFY_ID, builder.build()) }
     }
 
+    /** 取消 Live Update 通知；ColorOS 流体云取消有延迟，300ms 后二次兜底。 */
+    private fun cancelLiveNotify() {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        nm.cancel(NOTIFY_ID)
+        uiHandler.postDelayed({ nm.cancel(NOTIFY_ID) }, 300)
+    }
+
+    /** 回复到达：heads-up 大横幅自动弹出（live 形态下流体云胶囊之外的重要信息提示）。 */
+    private fun showHeadsUp(text: String) {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val notification = Notification.Builder(this, CHANNEL_HEADS_UP)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentTitle(getString(R.string.overlay_reply_title))
+            .setContentText(text)
+            .setStyle(Notification.BigTextStyle().bigText(text))
+            .setContentIntent(openAppPi())
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .build()
+        runCatching { nm.notify(HEADS_UP_ID, notification) }
+    }
+
     private fun openAppPi(): PendingIntent =
         PendingIntent.getActivity(
             this, 0,
@@ -363,6 +400,9 @@ class FairyOverlayService : Service() {
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_LIVE, getString(R.string.overlay_channel_live), NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_HEADS_UP, getString(R.string.overlay_channel_heads_up), NotificationManager.IMPORTANCE_HIGH)
         )
     }
 
@@ -403,10 +443,12 @@ class FairyOverlayService : Service() {
     companion object {
         private const val CHANNEL_CONN = "fairy_voice_conn"
         private const val CHANNEL_LIVE = "fairy_voice_live"
+        private const val CHANNEL_HEADS_UP = "fairy_voice_heads_up"
         // M4-1.3.3：与 ConnectionService(1001) 隔离，防止两个前台服务通知互相覆盖
         // 导致服务被系统误杀、流体云通知残留滞留
         private const val FG_NOTIFY_ID = 2001
         private const val NOTIFY_ID = 1002
+        private const val HEADS_UP_ID = 1003
         private const val OVERLAY_Y_DP = 140
         private const val REPLY_SHOW_MS = 20_000L
         private const val ERROR_SHOW_MS = 8_000L
