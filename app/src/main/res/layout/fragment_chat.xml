@@ -25,35 +25,36 @@
         android:paddingBottom="8dp"
         android:scrollbars="vertical" />
 
+    <EditText
+        android:id="@+id/etChatInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="@string/hint_ask_input"
+        android:imeOptions="actionSend"
+        android:inputType="text"
+        android:maxLines="3"
+        android:textColor="@color/fairy_text"
+        android:textColorHint="#80E1F5FE" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:orientation="horizontal">
 
-        <EditText
-            android:id="@+id/etChatInput"
+        <Button
+            android:id="@+id/btnChatMic"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="@string/hint_ask_input"
-            android:imeOptions="actionSend"
-            android:inputType="text"
-            android:maxLines="3"
-            android:textColor="@color/fairy_text"
-            android:textColorHint="#80E1F5FE" />
-
-        <Button
-            android:id="@+id/btnChatMic"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
             android:text="@string/btn_mic" />
 
         <Button
             android:id="@+id/btnChatSend"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:layout_marginStart="8dp"
             android:text="@string/btn_send_ask" />
     </LinearLayout>

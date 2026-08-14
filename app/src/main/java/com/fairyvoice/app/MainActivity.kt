@@ -73,8 +73,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        AppState.foreground = true
         LogFile.d("Main.onResume focus=${hasWindowFocus()}")
         if (hasWindowFocus()) fireWakeNow()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        AppState.foreground = false
     }
 
     /** M4-1.3.6：窗口就绪（获焦）即提前执行待处理唤醒。 */

@@ -32,6 +32,8 @@ object VoiceController {
     interface Listener {
         fun onStateChanged(state: State)
         fun onRecorded(file: File, hadSpeech: Boolean)
+        /** P3：ASR 识别完成，识别文本已确定（此时即可显示用户气泡，不必等 AI 回复）。 */
+        fun onRecognized(text: String) {}
         /** M4-2：AI 回复回调，recognized 为 B 端 ASR 识别文本（voice_ask 时非空）。 */
         fun onReply(text: String, recognized: String?) {}
         /** P3：AstrBot 主动推送的消息（无指令时下发）。 */
@@ -144,6 +146,8 @@ object VoiceController {
                     LogFile.d("VC.asr empty -> noSpeech")
                     throw IllegalStateException("未识别到语音，请重试")
                 }
+                // P3：识别完成立即通知 UI 显示用户气泡（不等 AI 回复）
+                notifyRecognized(text)
                 // 等 OneBot 连接就绪
                 var client = OneBotHolder.client
                 var waited = 0L
@@ -176,6 +180,10 @@ object VoiceController {
 
     private fun notifyRecorded(file: File, hadSpeech: Boolean) {
         for (l in listeners) l.onRecorded(file, hadSpeech)
+    }
+
+    private fun notifyRecognized(text: String) {
+        for (l in listeners) l.onRecognized(text)
     }
 
     private fun notifyReply(text: String, recognized: String?) {

@@ -65,13 +65,17 @@ class ChatFragment : Fragment() {
         }
 
         override fun onRecorded(file: File, hadSpeech: Boolean) {
-            // 气泡由 onReply 追加，无需单独处理
+            // 用户气泡由 onRecognized 追加
+        }
+
+        override fun onRecognized(text: String) {
+            // P3：识别完成立即显示用户气泡（不等 AI 回复）
+            uiHandler.post { addMessage(ChatMessage(text, Sender.USER)) }
         }
 
         override fun onReply(text: String, recognized: String?) {
             uiHandler.post {
-                // 语音链路：识别文本作为用户气泡，AI 回复作为 Fairy 气泡
-                if (!recognized.isNullOrBlank()) addMessage(ChatMessage(recognized, Sender.USER))
+                // 语音链路：用户气泡已在 onRecognized 显示，这里只加 Fairy 回复
                 addMessage(ChatMessage(text, Sender.FAIRY))
             }
         }

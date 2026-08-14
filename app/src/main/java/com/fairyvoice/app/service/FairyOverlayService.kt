@@ -48,6 +48,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import com.fairyvoice.app.AppState
 import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.R
 import com.fairyvoice.app.audio.VoiceController
@@ -217,13 +218,13 @@ class FairyOverlayService : Service() {
             uiHandler.post {
                 LogFile.d("Overlay.onReply recognized=${recognized} len=${text.length}")
                 lastReply = text
-                // P2：悬浮卡片同时展示识别文本与 AI 回复
                 val display = if (recognized.isNullOrBlank()) text else "识别：$recognized\n$text"
-                // P3：自动展开悬浮卡片展示全部回复（亮屏无需点击、可滚动）
-                showReplyCard(display)
-                // P3：高优先级通知——息屏/锁屏也能收到提醒（点开看全文），屏幕亮时与悬浮卡片并存
-                showHeadsUp(display)
-                scheduleHide(REPLY_SHOW_MS)
+                // P3：仅在 App 非前台时弹悬浮卡片 + 息屏通知（前台由对话页气泡承接，避免遮挡界面）
+                if (!AppState.foreground) {
+                    showReplyCard(display)
+                    showHeadsUp(display)
+                    scheduleHide(REPLY_SHOW_MS)
+                }
             }
         }
 
@@ -237,13 +238,15 @@ class FairyOverlayService : Service() {
         }
 
         override fun onPush(text: String) {
-            // P3：AstrBot 主动推送——悬浮卡片 + 息屏高优先级通知
+            // P3：AstrBot 主动推送——App 非前台时悬浮卡片 + 息屏高优先级通知
             uiHandler.post {
                 LogFile.d("Overlay.onPush len=${text.length}")
                 lastReply = text
-                showReplyCard(text)
-                showHeadsUp(text)
-                scheduleHide(REPLY_SHOW_MS)
+                if (!AppState.foreground) {
+                    showReplyCard(text)
+                    showHeadsUp(text)
+                    scheduleHide(REPLY_SHOW_MS)
+                }
             }
         }
     }
