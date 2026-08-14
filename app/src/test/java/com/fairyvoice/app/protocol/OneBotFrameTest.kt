@@ -103,4 +103,48 @@ class OneBotFrameTest {
         assertEquals("hi", oneBotExtractText("hi"))
         assertEquals("", oneBotExtractText(null))
     }
+
+    // ---------- P4 TTS：record 段解析 ----------
+
+    @Test
+    fun `extractRecord 提取 base64 音频`() {
+        val msg = org.json.JSONArray().put(JSONObject().apply {
+            put("type", "record"); put("data", JSONObject().put("file", "base64://U1VDSw=="))
+        })
+        val tts = oneBotExtractRecord(msg)
+        assertNotNull(tts)
+        assertEquals("U1VDSw==", tts!!.audioBase64)
+        assertNull(tts.audioUrl)
+    }
+
+    @Test
+    fun `extractRecord 提取 http url 音频`() {
+        val msg = org.json.JSONArray().put(JSONObject().apply {
+            put("type", "record"); put("data", JSONObject().put("file", "https://example.com/a.mp3"))
+        })
+        val tts = oneBotExtractRecord(msg)
+        assertNotNull(tts)
+        assertNull(tts!!.audioBase64)
+        assertEquals("https://example.com/a.mp3", tts.audioUrl)
+    }
+
+    @Test
+    fun `extractRecord 从文本+语音混合段提取语音`() {
+        val msg = org.json.JSONArray()
+            .put(JSONObject().apply { put("type", "text"); put("data", JSONObject().put("text", "回复")) })
+            .put(JSONObject().apply { put("type", "record"); put("data", JSONObject().put("file", "base64://YXVkaW8=")) })
+        val tts = oneBotExtractRecord(msg)
+        assertNotNull(tts)
+        assertEquals("YXVkaW8=", tts!!.audioBase64)
+    }
+
+    @Test
+    fun `extractRecord 无 record 段返回 null`() {
+        assertNull(oneBotExtractRecord(null))
+        assertNull(oneBotExtractRecord("纯文本"))
+        val msg = org.json.JSONArray().put(JSONObject().apply {
+            put("type", "text"); put("data", JSONObject().put("text", "hi"))
+        })
+        assertNull(oneBotExtractRecord(msg))
+    }
 }

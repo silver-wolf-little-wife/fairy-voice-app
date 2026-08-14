@@ -98,3 +98,30 @@ fun oneBotExtractText(message: Any?): String = when (message) {
     }
     else -> message?.toString() ?: ""
 }
+
+/** OneBot record 段（P4 TTS）：语音数据。audioBase64 为 base64:// 内容，audioUrl 为 http(s) URL。 */
+data class OneBotTts(
+    val audioBase64: String?,
+    val audioUrl: String?,
+)
+
+/**
+ * 从消息段数组提取 record 语音（P4 TTS，AstrBot 内置 TTS 通过 record 段下发）。
+ * 优先 base64://（aiocqhttp 转换格式），其次 http(s) URL（file_service 模式）。
+ */
+fun oneBotExtractRecord(message: Any?): OneBotTts? {
+    if (message is JSONArray) {
+        for (i in 0 until message.length()) {
+            val seg = message.optJSONObject(i) ?: continue
+            if (seg.optString("type") == "record") {
+                val file = seg.optJSONObject("data")?.optString("file").orEmpty()
+                return when {
+                    file.startsWith("base64://") -> OneBotTts(file.substringAfter("base64://"), null)
+                    file.startsWith("http") -> OneBotTts(null, file)
+                    else -> OneBotTts(null, null)
+                }
+            }
+        }
+    }
+    return null
+}

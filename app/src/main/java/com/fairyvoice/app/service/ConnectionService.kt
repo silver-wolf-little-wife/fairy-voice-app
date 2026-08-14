@@ -49,6 +49,8 @@ class ConnectionService : Service() {
         client?.start()
         // P3：把 OneBotClient 的主动推送回调挂到 VoiceController（息屏/对话页都能收到）
         VoiceController.attachPush()
+        // P4：把 record 语音回调挂到 VoiceController（TTS 播报）
+        VoiceController.attachTts(this)
         return START_STICKY
     }
 

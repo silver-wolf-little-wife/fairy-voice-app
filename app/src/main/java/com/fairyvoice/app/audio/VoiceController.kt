@@ -16,6 +16,7 @@
 package com.fairyvoice.app.audio
 
 import android.content.Context
+import android.media.MediaPlayer
 import com.fairyvoice.app.ChatHistory
 import com.fairyvoice.app.ChatSender
 import com.fairyvoice.app.OneBotHolder
@@ -57,6 +58,7 @@ object VoiceController {
     }
 
     private var recorder: AudioRecorder? = null
+    private var player: MediaPlayer? = null
     private val lock = Any()
 
     val currentState: State get() = state
@@ -83,8 +85,15 @@ object VoiceController {
     fun startRecording(context: Context, autoAsk: Boolean) {
         synchronized(lock) {
             if (state != State.IDLE) {
-                LogFile.d("VC.startRecording skipped state=$state")
-                return
+                // P4：播报中再按 = 打断播报并重新录音
+                if (state == State.SPEAKING) {
+                    LogFile.d("VC.startRecording interrupt SPEAKING")
+                    stopTts()
+                    setState(State.IDLE)
+                } else {
+                    LogFile.d("VC.startRecording skipped state=$state")
+                    return
+                }
             }
             LogFile.d("VC.startRecording autoAsk=$autoAsk")
             val dir = File(context.filesDir, "recordings").apply { mkdirs() }
@@ -223,6 +232,62 @@ object VoiceController {
      */
     fun attachPush() {
         OneBotHolder.client?.onPush = { text -> notifyPush(text) }
+    }
+
+    /**
+     * P4 TTS：把 OneBotClient 的 record 语音回调挂到 VoiceController（client 重建后需重新调用）。
+     * 收到音频 → 播放 → SPEAKING → 播完 IDLE。
+     */
+    fun attachTts(context: Context) {
+        val appCtx = context.applicationContext
+        OneBotHolder.client?.onTts = { audioBytes ->
+            playTts(appCtx, audioBytes)
+        }
+    }
+
+    /** 播放 TTS 音频（后台线程）；播完/失败回 IDLE。 */
+    private fun playTts(context: Context, audioBytes: ByteArray) {
+        Thread {
+            try {
+                stopTts()
+                setState(State.SPEAKING)
+                val f = File(context.cacheDir, "fairy_tts_${System.currentTimeMillis()}.mp3")
+                f.writeBytes(audioBytes)
+                val mp = MediaPlayer()
+                mp.setDataSource(f.absolutePath)
+                mp.setOnCompletionListener {
+                    runCatching { mp.release() }
+                    f.delete()
+                    player = null
+                    setState(State.IDLE)
+                }
+                mp.setOnErrorListener { _, _, _ ->
+                    runCatching { mp.release() }
+                    f.delete()
+                    player = null
+                    setState(State.IDLE)
+                    true
+                }
+                mp.prepare()
+                mp.start()
+                player = mp
+                LogFile.d("VC.tts start ${audioBytes.size}B")
+            } catch (e: Exception) {
+                LogFile.e("VC.tts fail ${e.message}")
+                setState(State.IDLE)
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
+    /** 打断当前 TTS 播报。 */
+    fun stopTts() {
+        synchronized(lock) {
+            player?.let {
+                runCatching { it.stop() }
+                runCatching { it.release() }
+            }
+            player = null
+        }
     }
 
     private fun notifyPush(text: String) {

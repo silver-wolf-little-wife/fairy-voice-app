@@ -51,6 +51,8 @@ class OneBotClient(
     var onReply: ((String) -> Unit)? = null
     /** AstrBot 主动下发的消息（无 pending 指令时的 send_private_msg）。 */
     var onPush: ((String) -> Unit)? = null
+    /** P4 TTS：AstrBot 通过 record 段下发的语音数据（调用方自行切线程播放）。 */
+    var onTts: ((ByteArray) -> Unit)? = null
     var onDisconnect: (() -> Unit)? = null
 
     // 配置快照，供 holder 判断配置变化
@@ -231,12 +233,37 @@ class OneBotClient(
     }
 
     private fun handleSendMsg(req: OneBotApiRequest) {
-        val text = oneBotExtractText(req.params.opt("message"))
+        val message = req.params.opt("message")
+        val text = oneBotExtractText(message)
         sendApiOk(req, JSONObject().put("message_id", msgId.getAndIncrement()))
         // 匹配到 pending 指令 = 指令回复（onReply）；否则 = AstrBot 主动推送（onPush）
         val matched = resolvePending(text)
         if (matched) onReply?.invoke(text) else onPush?.invoke(text)
+        // P4 TTS：提取 record 语音段（base64:// 直接解码；http URL 异步下载）
+        val tts = oneBotExtractRecord(message)
+        if (tts != null) {
+            when {
+                tts.audioBase64 != null -> runCatching {
+                    onTts?.invoke(java.util.Base64.getDecoder().decode(tts.audioBase64))
+                }
+                tts.audioUrl != null -> {
+                    val url = tts.audioUrl
+                    Thread {
+                        val bytes = downloadAudio(url)
+                        if (bytes != null) onTts?.invoke(bytes)
+                    }.apply { isDaemon = true }.start()
+                }
+            }
+        }
     }
+
+    /** 下载 record 的 http URL 音频（file_service 模式）。 */
+    private fun downloadAudio(url: String): ByteArray? = runCatching {
+        val req = Request.Builder().url(url).build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.isSuccessful) resp.body?.bytes() else null
+        }
+    }.getOrNull()
 
     private fun handleGetStrangerInfo(req: OneBotApiRequest) {
         val uid = req.params.optString("user_id", userId)
