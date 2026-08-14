@@ -44,6 +44,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
@@ -242,6 +243,14 @@ class FairyOverlayService : Service() {
         capsule = root.findViewById(R.id.overlayCapsule)
         card = root.findViewById(R.id.overlayCard)
         cardText = root.findViewById(R.id.overlayCardText)
+        // P3：ScrollView 的 android:maxHeight 在 wrap_content 父容器下不生效（会撑破卡片超屏），
+        // 改用代码固定滚动区高度（屏幕 40%），长回复内部滚动、卡片不出屏
+        val screenH = resources.displayMetrics.heightPixels
+        root.findViewById<ScrollView>(R.id.overlayScroll)?.apply {
+            layoutParams = layoutParams.apply {
+                height = (screenH * 0.4f).toInt()
+            }
+        }
         root.findViewById<TextView>(R.id.overlayBtnCopy).setOnClickListener { copyReply() }
         root.findViewById<TextView>(R.id.overlayBtnClose).setOnClickListener { hideAll() }
         capsule?.setOnClickListener { onCapsuleClick() }

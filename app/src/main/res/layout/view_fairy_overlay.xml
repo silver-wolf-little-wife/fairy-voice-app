@@ -19,11 +19,13 @@
         android:textColor="@color/fairy_text"
         android:textSize="14sp" />
 
-    <!-- 卡片：AI 回复文本 + 操作（复制 / 收起） -->
+    <!-- 卡片：AI 回复文本 + 操作（复制 / 收起）
+         最大高度兜底，防止长回复把卡片撑出屏幕（ScrollView 负责内部滚动） -->
     <LinearLayout
         android:id="@+id/overlayCard"
         android:layout_width="260dp"
         android:layout_height="wrap_content"
+        android:maxHeight="380dp"
         android:background="@drawable/overlay_card_bg"
         android:orientation="vertical"
         android:padding="16dp"
@@ -37,8 +39,9 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
-        <!-- P3：长回复全文展示——卡片内 ScrollView 滚动，不截断 -->
+        <!-- P3：长回复全文展示——卡片内 ScrollView 滚动，不截断（高度由代码按屏幕动态限制） -->
         <ScrollView
+            android:id="@+id/overlayScroll"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
