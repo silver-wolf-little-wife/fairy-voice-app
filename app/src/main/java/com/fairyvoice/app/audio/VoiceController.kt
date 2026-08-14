@@ -17,6 +17,8 @@ package com.fairyvoice.app.audio
 
 import android.content.Context
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
 import com.fairyvoice.app.ChatHistory
 import com.fairyvoice.app.ChatSender
 import com.fairyvoice.app.OneBotHolder
@@ -61,6 +63,10 @@ object VoiceController {
     private var player: MediaPlayer? = null
     private val lock = Any()
 
+    // P4：空闲释放 ASR 模型（省内存）——语音结束后延迟释放，新语音取消
+    private val asrReleaseHandler = Handler(Looper.getMainLooper())
+    private var asrReleaseTask: Runnable? = null
+
     val currentState: State get() = state
 
     fun addListener(l: Listener) {
@@ -95,6 +101,8 @@ object VoiceController {
                     return
                 }
             }
+            // P4：新语音取消空闲释放，模型保持热
+            cancelAsrRelease()
             LogFile.d("VC.startRecording autoAsk=$autoAsk")
             val dir = File(context.filesDir, "recordings").apply { mkdirs() }
             val name = "fairy_" +
@@ -119,6 +127,8 @@ object VoiceController {
                     if (goAsk) {
                         askWithVoice(context, file)
                     }
+                    // P4：录音结束调度空闲释放（30s 无新语音则释放 ASR 模型）
+                    scheduleAsrRelease()
                 }
 
                 override fun onError(e: Exception) {
@@ -199,9 +209,11 @@ object VoiceController {
                 setState(State.IDLE)
                 LogFile.d("VC.ask reply len=${reply.length}")
                 notifyReply(reply, text)
+                scheduleAsrRelease()
             } catch (e: Exception) {
                 setState(State.IDLE)
                 notifyError(e)
+                scheduleAsrRelease()
             }
         }.start()
     }
@@ -279,6 +291,22 @@ object VoiceController {
         }.apply { isDaemon = true }.start()
     }
 
+    /** P4：语音结束后调度空闲释放 ASR 模型（延迟后 release，省内存）。 */
+    private fun scheduleAsrRelease() {
+        asrReleaseTask?.let { asrReleaseHandler.removeCallbacks(it) }
+        asrReleaseTask = Runnable {
+            asrReleaseTask = null
+            LogFile.d("VC.asr release (idle)")
+            OnnxAsr.release()
+        }
+        asrReleaseHandler.postDelayed(asrReleaseTask!!, ASR_RELEASE_DELAY_MS)
+    }
+
+    private fun cancelAsrRelease() {
+        asrReleaseTask?.let { asrReleaseHandler.removeCallbacks(it) }
+        asrReleaseTask = null
+    }
+
     /** 打断当前 TTS 播报。 */
     fun stopTts() {
         synchronized(lock) {
@@ -314,6 +342,9 @@ object VoiceController {
 
     /** P3：识别看门狗超时（防 ASR 卡死导致永久「识别中」）。 */
     private const val ASR_TIMEOUT_MS = 10_000L
+
+    /** P4：空闲释放 ASR 模型的延迟（30s 无新语音则释放）。 */
+    private const val ASR_RELEASE_DELAY_MS = 30_000L
 
     private const val WAV_HEADER_SIZE = 44L
 }
