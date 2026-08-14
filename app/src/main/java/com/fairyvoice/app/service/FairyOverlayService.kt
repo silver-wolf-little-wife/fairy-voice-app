@@ -272,16 +272,18 @@ class FairyOverlayService : Service() {
         capsule?.setOnClickListener { onCapsuleClick() }
         capsule?.let { makeDraggable(it) }
 
+        // P4：固定窗口宽度(280dp)，用 START 锚定 + 显式 x 居中（不依赖 WRAP_CONTENT 重测，
+        // 根治 ColorOS 上内容变化导致偏右/靠左）；胶囊/卡片在窗口内 center_horizontal 居中
         val lp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            dp(OVERLAY_WIDTH_DP),
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // P4：去掉 FLAG_LAYOUT_NO_LIMITS（允许内容溢出屏幕边界，是内容变化后偏右的元凶）
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.TOP or Gravity.START
             y = dp(OVERLAY_Y_DP)
+            x = centeredX()
         }
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         runCatching { wm?.addView(root, lp) }.onFailure { return }
@@ -406,10 +408,16 @@ class FairyOverlayService : Service() {
         }
     }
 
-    /** 内容（胶囊文本/卡片）变化后强制重测窗口尺寸并重新定位（保持水平居中）。 */
+    /**
+     * 内容（胶囊文本/卡片）变化后强制重测窗口尺寸。
+     * 悬浮窗 root 为 match_parent（全宽），胶囊/卡片在内部 center_horizontal 居中，
+     * 因此 x=0 + 全宽窗口即可保证内容水平居中（规避 ColorOS 的 CENTER_HORIZONTAL 偏右问题）。
+     */
     private fun relayoutOverlay() {
         val root = overlayRoot ?: return
         val lp = root.layoutParams as? WindowManager.LayoutParams ?: return
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = 0
         runCatching { wm?.updateViewLayout(root, lp) }
     }
 

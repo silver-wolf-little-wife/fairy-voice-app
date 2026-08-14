@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 悬浮窗（小布/Siri 式）：胶囊 + 展开卡片。胶囊常显，卡片在回复/错误时展开。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="wrap_content"
+    android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical">
 
@@ -10,6 +10,7 @@
         android:id="@+id/overlayCapsule"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
         android:background="@drawable/overlay_capsule_bg"
         android:paddingStart="16dp"
         android:paddingEnd="16dp"
@@ -25,6 +26,7 @@
         android:id="@+id/overlayCard"
         android:layout_width="260dp"
         android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
         android:maxHeight="380dp"
         android:background="@drawable/overlay_card_bg"
         android:orientation="vertical"
