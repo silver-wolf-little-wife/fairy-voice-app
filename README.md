@@ -1,8 +1,9 @@
 # fairy-voice-android
 
-fairy-voice 的 C 端 Android 语音终端（M3 里程碑 · 骨架版）。
+fairy-voice 的 C 端 Android 语音终端（M3 骨架版 → M4 语音闭环 → **规划迁移：OneBot V11 直连 AstrBot**）。
 
-> 对应 B 端插件仓库 `fairy-voice`（AstrBot 插件）与协议文档 `docs/PROTOCOL.md`。
+> 当前实现：对应 B 端插件仓库 `fairy-voice`（AstrBot 插件，自研 WS 协议，见 `docs/PROTOCOL.md`）。
+> **规划方向（2026-08-14 起，P0 已验证通过，见「新方案规划」）：C 端直连 AstrBot 的 OneBot V11 适配器 + 本地 ASR，替代自研 B 端插件。**
 > 本仓库替代原 Python 桌面版 `fairy-voice-app` 作为手机端终端：WS 常驻连接 + 实体键唤醒，M4 起挂接录音/识别/TTS。
 
 ## 架构
@@ -44,6 +45,35 @@ gradle testDebugUnitTest      # 协议 + WS 客户端单测（本地 MockWebServ
 3. 在系统设置开启「Fairy Voice」无障碍服务（实体键唤醒依赖）。
 4. 同时按住 **音量上 + 音量下 0.5 秒** 唤醒（M3 唤醒 = 拉起主界面；M4 改为直接开始录音）。
 5. M3 联调：在输入框输入指令文本，点「发送 ask」，查看 AI 回复。
+
+## 新方案规划（OneBot V11 直连 AstrBot + 本地 ASR）
+
+> 完整计划与阶段划分见 `docs/PLAN_ONEBOT_MIGRATION.md`。
+
+**动机**：砍掉自研 B 端插件，C 端伪装成最小 OneBot V11 客户端直连 AstrBot 原生适配器（aiocqhttp），
+白嫖多 provider / 工具 / 会话记忆 / dashboard；ASR 本地化（sherpa-onnx），数据不出手机。
+
+```
+手机（C 端 = 最小 OneBot 客户端 + 本地 ASR）           AstrBot（原生，零自研插件）
+┌──────────────────────────────────┐   反向 WS 主动外连   ┌──────────────────────────────┐
+│ 唤醒 → 录音 → C 端本地 ASR        │ ──/ws/──▶          │ aiocqhttp (OneBot V11) 适配器 │
+│   ↓ 识别文本 → 私聊事件上报        │   universal 单连接  │   ↓ 原生 LLM / 工具 / 会话记忆 │
+│ OneBotClient (OkHttp WS)          │ ◀───────────────── │ send_private_msg API 调用    │
+│   ↓ 回复 → 悬浮窗/流体云/未来TTS    │                    │                              │
+└──────────────────────────────────┘                    └──────────────────────────────┘
+```
+
+**P0 技术验证结果（2026-08-14，全部通过）**：
+
+| 项 | 结果 |
+|---|---|
+| OneBot 反向 WS 端点/鉴权 | ✅ `aiocqhttp 1.4.4` 支持 `/ws`、`/ws/event`、`/ws/api`；握手 Headers `X-Client-Role` + `X-Self-ID` + `Authorization: Bearer`；**universal 单连接已端到端实测通过**（连接→事件上报→`send_private_msg` 下发→结果回传） |
+| AstrBot 私聊直答 | ✅ `friend_message_needs_wake_prefix=False`（默认私聊直答）；ID 白名单默认关闭 |
+| ASR 选型 | ✅ `sherpa-onnx 1.13.5` + `paraformer-zh-small`（74MB）：中文识别精准（测试集中文/中英混合），5.6s 音频推理约 23ms（PC CPU），实时率远小于 1 |
+| Android 集成 | ✅ AAR（`sherpa-onnx-1.13.5.aar`）在 AGP 8.7.3 / compileSdk 37 / JDK 21 下 `assembleDebug` 编译通过；已加 `abiFilters`（arm64-v8a + armeabi-v7a）裁剪 APK |
+
+**规划模块变更**：`protocol/FairyVoiceClient.kt`（自研协议）→ 冻结保留作回退，新增 `protocol/OneBotClient.kt`；
+`audio/VoiceController.askWithVoice` → 本地 ASR → OneBot 上报；新增 `audio/OnnxAsr.kt`；B 端插件冻结不删。
 
 ## 实体键唤醒的边界（重要）
 

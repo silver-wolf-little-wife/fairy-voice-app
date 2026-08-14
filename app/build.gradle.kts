@@ -16,6 +16,11 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        // P0-4：sherpa-onnx AAR 含 4 架构 .so（共 ~120MB），仅保留手机架构裁剪 APK 体积
+        // （x86/x86_64 仅模拟器用；如需模拟器调试再临时加回）
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
@@ -46,6 +51,8 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // P0-4 验证：sherpa-onnx 本地 ASR（AAR 含 onnxruntime + paraformer 推理，见 docs/PLAN_ONEBOT_MIGRATION.md）
+    implementation(files("libs/sherpa-onnx-1.13.5.aar"))
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
