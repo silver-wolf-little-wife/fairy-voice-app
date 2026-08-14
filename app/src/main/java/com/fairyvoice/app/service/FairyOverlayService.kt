@@ -197,6 +197,8 @@ class FairyOverlayService : Service() {
                     visibility = View.VISIBLE
                     this.text = text
                 }
+                // P4：胶囊文本变化（如「播报中…」变长）后重测窗口宽度并保持居中，防内容溢出偏右
+                relayoutOverlay()
                 if (shouldPublishLive()) updateLiveNotification(text, null)
             }
         }
@@ -274,7 +276,8 @@ class FairyOverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            // P4：去掉 FLAG_LAYOUT_NO_LIMITS（允许内容溢出屏幕边界，是内容变化后偏右的元凶）
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -396,10 +399,18 @@ class FairyOverlayService : Service() {
             cardText?.text = text
             capsule?.visibility = View.GONE
             card?.visibility = View.VISIBLE
-            // 新文本默认在顶部（ScrollView）
+            // P4：卡片（260dp）显示后重测窗口并居中，防内容溢出偏右
+            relayoutOverlay()
         } else if (shouldPublishLive()) {
             updateLiveNotification(getString(R.string.overlay_reply_title), text)
         }
+    }
+
+    /** 内容（胶囊文本/卡片）变化后强制重测窗口尺寸并重新定位（保持水平居中）。 */
+    private fun relayoutOverlay() {
+        val root = overlayRoot ?: return
+        val lp = root.layoutParams as? WindowManager.LayoutParams ?: return
+        runCatching { wm?.updateViewLayout(root, lp) }
     }
 
     private fun openAppPi(): PendingIntent =
