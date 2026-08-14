@@ -218,12 +218,8 @@ class FairyOverlayService : Service() {
                 lastReply = text
                 // P2：悬浮卡片同时展示识别文本与 AI 回复
                 val display = if (recognized.isNullOrBlank()) text else "识别：$recognized\n$text"
-                showCard(display)
-                if (shouldPublishLive()) {
-                    updateLiveNotification(getString(R.string.overlay_reply_title), display)
-                    // P3：回复到达时 heads-up 大横幅自动弹出（流体云胶囊之外的重要信息）
-                    showHeadsUp(display)
-                }
+                // P3：自动展开悬浮卡片展示全部回复（无需点击、不切界面、可滚动）
+                showReplyCard(display)
                 scheduleHide(REPLY_SHOW_MS)
             }
         }
@@ -367,19 +363,20 @@ class FairyOverlayService : Service() {
         uiHandler.postDelayed({ nm.cancel(NOTIFY_ID) }, 300)
     }
 
-    /** 回复到达：heads-up 大横幅自动弹出（live 形态下流体云胶囊之外的重要信息提示）。 */
-    private fun showHeadsUp(text: String) {
-        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        val notification = Notification.Builder(this, CHANNEL_HEADS_UP)
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentTitle(getString(R.string.overlay_reply_title))
-            .setContentText(text)
-            .setStyle(Notification.BigTextStyle().bigText(text))
-            .setContentIntent(openAppPi())
-            .setCategory(Notification.CATEGORY_MESSAGE)
-            .setAutoCancel(true)
-            .build()
-        runCatching { nm.notify(HEADS_UP_ID, notification) }
+    /**
+     * P3 回复展示：优先悬浮窗卡片**自动展开全部回复**（可滚动、带复制/收起，无需点击、不切界面）。
+     * 无悬浮窗权限时退回流体云/通知（长文本点开可看全文），并在提示中引导开启权限。
+     */
+    private fun showReplyCard(text: String) {
+        if (Settings.canDrawOverlays(this)) {
+            if (overlayRoot == null) showOverlay()
+            cardText?.text = text
+            capsule?.visibility = View.GONE
+            card?.visibility = View.VISIBLE
+            // 新文本默认在顶部（ScrollView）
+        } else if (shouldPublishLive()) {
+            updateLiveNotification(getString(R.string.overlay_reply_title), text)
+        }
     }
 
     private fun openAppPi(): PendingIntent =
@@ -400,9 +397,6 @@ class FairyOverlayService : Service() {
         )
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_LIVE, getString(R.string.overlay_channel_live), NotificationManager.IMPORTANCE_DEFAULT)
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_HEADS_UP, getString(R.string.overlay_channel_heads_up), NotificationManager.IMPORTANCE_HIGH)
         )
     }
 
@@ -443,12 +437,10 @@ class FairyOverlayService : Service() {
     companion object {
         private const val CHANNEL_CONN = "fairy_voice_conn"
         private const val CHANNEL_LIVE = "fairy_voice_live"
-        private const val CHANNEL_HEADS_UP = "fairy_voice_heads_up"
         // M4-1.3.3：与 ConnectionService(1001) 隔离，防止两个前台服务通知互相覆盖
         // 导致服务被系统误杀、流体云通知残留滞留
         private const val FG_NOTIFY_ID = 2001
         private const val NOTIFY_ID = 1002
-        private const val HEADS_UP_ID = 1003
         private const val OVERLAY_Y_DP = 140
         private const val REPLY_SHOW_MS = 20_000L
         private const val ERROR_SHOW_MS = 8_000L

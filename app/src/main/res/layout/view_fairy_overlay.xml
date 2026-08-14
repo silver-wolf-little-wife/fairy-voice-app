@@ -37,13 +37,21 @@
             android:textSize="16sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/overlayCardText"
+        <!-- P3：长回复全文展示——卡片内 ScrollView 滚动，不截断 -->
+        <ScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:textColor="@color/fairy_text"
-            android:textSize="14sp" />
+            android:maxHeight="260dp"
+            android:scrollbars="vertical">
+
+            <TextView
+                android:id="@+id/overlayCardText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/fairy_text"
+                android:textSize="14sp" />
+        </ScrollView>
 
         <LinearLayout
             android:layout_width="match_parent"
