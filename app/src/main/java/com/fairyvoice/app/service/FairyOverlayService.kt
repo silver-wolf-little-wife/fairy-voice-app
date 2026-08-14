@@ -417,7 +417,7 @@ class FairyOverlayService : Service() {
         val root = overlayRoot ?: return
         val lp = root.layoutParams as? WindowManager.LayoutParams ?: return
         lp.gravity = Gravity.TOP or Gravity.START
-        lp.x = 0
+        lp.x = centeredX()
         runCatching { wm?.updateViewLayout(root, lp) }
     }
 
@@ -476,6 +476,12 @@ class FairyOverlayService : Service() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    /** 悬浮窗水平居中 x（基于固定窗口宽度 OVERLAY_WIDTH_DP，ColorOS 兼容）。 */
+    private fun centeredX(): Int {
+        val w = dp(OVERLAY_WIDTH_DP)
+        return ((resources.displayMetrics.widthPixels - w) / 2).coerceAtLeast(0)
+    }
+
     companion object {
         private const val CHANNEL_CONN = "fairy_voice_conn"
         private const val CHANNEL_LIVE = "fairy_voice_live"
@@ -484,6 +490,7 @@ class FairyOverlayService : Service() {
         private const val FG_NOTIFY_ID = 1001
         private const val NOTIFY_ID = 1002
         private const val OVERLAY_Y_DP = 140
+        private const val OVERLAY_WIDTH_DP = 280
         private const val REPLY_SHOW_MS = 20_000L
         private const val ERROR_SHOW_MS = 8_000L
         const val ACTION_HIDE = "com.fairyvoice.app.action.OVERLAY_HIDE"
