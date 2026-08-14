@@ -39,7 +39,7 @@ fairy-voice 的 C 端 Android 语音终端（**现行：OneBot V11 直连 AstrBo
 |---|---|---|
 | **P0** | 技术验证（WS 端点/私聊直答/ASR 选型/Android 集成） | ✅ 全部通过 |
 | P1 | OneBot 客户端：`OneBotClient.kt`（universal 单连接 + 事件上报 + API 分发 + 重连）+ `OneBotFrame.kt` + ConnectionService/Prefs/配置 UI | ✅ 已完成 |
-| P2 | 本地 ASR：`audio/OnnxAsr.kt`（sherpa-onnx），`VoiceController` 链路改造（录音→ASR→上报→收回复） | ⬜ |
+| P2 | 本地 ASR：`audio/OnnxAsr.kt`（sherpa-onnx + paraformer-zh-small 模型进 assets），`VoiceController` 链路改造（录音→ASR→上报→收回复） | ✅ 已完成 |
 | P3 | 交互收尾：长回复全文 / 错误提示 / M4 验收 | ⬜ |
 | P4 | TTS 播报（OneBot record 段 or 系统 TTS，可选） | ⬜ |
 

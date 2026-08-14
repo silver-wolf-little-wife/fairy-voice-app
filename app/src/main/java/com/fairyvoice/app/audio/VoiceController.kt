@@ -16,9 +16,9 @@
 package com.fairyvoice.app.audio
 
 import android.content.Context
-import com.fairyvoice.app.FairyClientHolder
+import com.fairyvoice.app.OneBotHolder
 import com.fairyvoice.app.util.LogFile
-import com.fairyvoice.app.protocol.FairyVoiceException
+import com.fairyvoice.app.protocol.OneBotException
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -97,7 +97,7 @@ object VoiceController {
                     val goAsk = autoAsk && hadSpeech && pcm >= MIN_SPEECH_BYTES.toLong()
                     LogFile.d("VC.onStop speech=$hadSpeech pcm=$pcm goAsk=$goAsk")
                     if (goAsk) {
-                        askWithVoice(file)
+                        askWithVoice(context, file)
                     }
                 }
 
@@ -123,37 +123,43 @@ object VoiceController {
      * M4-1.3.2：冷启动自动连接后 B 端 WebSocket 可能尚未就绪，最多等待
      * [CONNECT_WAIT_MS] 再判定失败，避免「录音完但连接没跟上」的误报。
      */
-    private fun askWithVoice(file: File) {
+    /**
+     * P2：录音完成 → 本地 ASR（OnnxAsr）→ 文本 → OneBot 上报（OneBotClient.sendPrivateMessage）
+     * → 收到 AstrBot 回复 → onReply(reply, recognized=识别文本)。
+     * 识别失败 / 模型未就绪 / 未连接均走 onError。
+     */
+    private fun askWithVoice(context: Context, file: File) {
         Thread {
             setState(State.RECOGNIZING)
             try {
-                var client = FairyClientHolder.client
+                // 本地 ASR（懒加载模型）
+                if (!OnnxAsr.ensureLoaded(context)) {
+                    LogFile.e("VC.asr model not loaded")
+                    throw IllegalStateException("本地识别模型加载失败，请查看日志")
+                }
+                val text = OnnxAsr.recognize(file)
+                if (text.isNullOrBlank()) {
+                    LogFile.d("VC.asr empty -> noSpeech")
+                    throw IllegalStateException("未识别到语音，请重试")
+                }
+                // 等 OneBot 连接就绪
+                var client = OneBotHolder.client
                 var waited = 0L
                 while ((client == null || !client.isConnected) && waited < CONNECT_WAIT_MS) {
                     Thread.sleep(200)
                     waited += 200
-                    client = FairyClientHolder.client
+                    client = OneBotHolder.client
                 }
                 if (client == null || !client.isConnected) {
-                    LogFile.e("VC.voiceAsk notConnected waited=$waited")
-                    throw FairyVoiceException.NotConnected("未连接 B 端，先启动连接")
+                    LogFile.e("VC.ask notConnected waited=$waited")
+                    throw OneBotException.NotConnected("未连接 AstrBot，先启动连接")
                 }
-                val wav = file.readBytes()
-                if (wav.size < WAV_HEADER_SIZE.toInt()) {
-                    throw FairyVoiceException.AskError("empty_audio", "录音文件无效")
-                }
-                // java.util.Base64（API 26+），纯 JVM 可用，避免 Android Base64 依赖
-                val b64 = java.util.Base64.getEncoder().encodeToString(wav)
                 setState(State.WAITING_AI)
-                LogFile.d("VC.voiceAsk send wav=${wav.size}B waited=$waited")
-                val resp = client.sendVoiceAsk(b64, "zh-CN")
+                LogFile.d("VC.ask text=$text waited=$waited")
+                val reply = client.sendPrivateMessage(text)
                 setState(State.IDLE)
-                LogFile.d("VC.voiceAsk resp ok=${resp.ok} recognized=${resp.recognized} err=${resp.errorCode}")
-                if (resp.ok) {
-                    notifyReply(resp.text ?: "", resp.recognized)
-                } else {
-                    notifyError(FairyVoiceException.AskError(resp.errorCode ?: "unknown", resp.errorMessage ?: ""))
-                }
+                LogFile.d("VC.ask reply len=${reply.length}")
+                notifyReply(reply, text)
             } catch (e: Exception) {
                 setState(State.IDLE)
                 notifyError(e)

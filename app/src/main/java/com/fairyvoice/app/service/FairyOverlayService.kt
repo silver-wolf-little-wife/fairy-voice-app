@@ -214,8 +214,10 @@ class FairyOverlayService : Service() {
             uiHandler.post {
                 LogFile.d("Overlay.onReply recognized=${recognized} len=${text.length}")
                 lastReply = text
-                showCard(text)
-                if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_reply_title), text)
+                // P2：悬浮卡片同时展示识别文本与 AI 回复
+                val display = if (recognized.isNullOrBlank()) text else "识别：$recognized\n$text"
+                showCard(display)
+                if (shouldPublishLive()) updateLiveNotification(getString(R.string.overlay_reply_title), display)
                 scheduleHide(REPLY_SHOW_MS)
             }
         }

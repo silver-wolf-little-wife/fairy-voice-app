@@ -1,6 +1,6 @@
 # 新方案实施计划：C 端 OneBot V11 直连 + 本地 ASR（替代 B 端插件）
 
-> 状态：**P0、P1 已完成（2026-08-14）**，P2（本地 ASR）待开工
+> 状态：**P0、P1、P2 已完成（2026-08-14）**，P3（交互收尾）待开工
 > 核心思路：**砍掉自研 B 端插件（fairy-voice）**，C 端改造为最小 OneBot 11「反向 WebSocket」客户端，
 > 直接把 ASR 后的文本以私聊消息上报给 AstrBot 的 aiocqhttp（OneBot V11）适配器，走 AstrBot 原生 LLM/工具/会话链路；
 > 同时把 ASR 从 B 端（faster-whisper）移植到 C 端（sherpa-onnx 本地识别），实现全链路离线、数据不出手机。
@@ -162,11 +162,12 @@ OneBot 是异步消息模型。单用户场景下用**简化关联**：
 - [x] 配置 UI：主界面配置区改为 AstrBot OneBot 连接参数（地址/token/self_id/user_id）
 - [x] 单测：帧构造/解析、API 分发、pending 关联/超时、断线重连（MockWebServer）——`OneBotFrameTest` 9 例 + `OneBotClientTest` 7 例全绿，全量 39 例通过
 
-### P2 本地 ASR（3~5 天）
-- [ ] sherpa-onnx AAR 集成、模型打包/懒加载
-- [ ] `audio/OnnxAsr.kt` 封装（识别后台线程、状态回调、错误码：model_loading / asr_failed / no_speech）
-- [ ] `VoiceController.askWithVoice` 改造：录音 → 本地 ASR → 文本 → OneBotClient 上报 → 收回复
-- [ ] 悬浮窗/流体云展示识别文本 + 回复（复用 M4-1.3 三形态）
+### P2 本地 ASR（**已完成 2026-08-14**）
+- [x] sherpa-onnx AAR 集成（P0-4）；**模型进 assets 直接加载**（`AssetManager`，无需拷贝 filesDir）——paraformer-zh-small 78MB
+- [x] `audio/OnnxAsr.kt` 封装：懒加载 `OfflineRecognizer`、WAV→PCM、识别、失败返回 null（识别后台线程）
+- [x] `VoiceController.askWithVoice` 改造：录音 → 本地 ASR → 文本 → `OneBotClient.sendPrivateMessage` → `onReply(reply, recognized=识别文本)`；错误提示（模型未就绪/未识别到语音/未连接）
+- [x] 悬浮窗/流体云卡片展示「识别：…\n回复：…」（复用 M4-1.3 三形态）
+- 已装机验证：唤醒→录音→本地识别→OneBot 上报→AstrBot 回复回显
 
 ### P3 交互收尾 + 验收（2~3 天）
 - [ ] 长回复完整可读（流体云截断 + 悬浮卡片滚动全文 + 复制）——继承 M4-2.1 C 端任务
