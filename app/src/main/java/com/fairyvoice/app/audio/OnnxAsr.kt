@@ -23,6 +23,9 @@ object OnnxAsr {
 
     private const val MODEL = "models/sherpa-onnx-paraformer-zh-small-2024-03-09/model.int8.onnx"
     private const val TOKENS = "models/sherpa-onnx-paraformer-zh-small-2024-03-09/tokens.txt"
+    /** 热词文件（方案B）：提升「Fairy」识别概率。 */
+    private const val HOTWORDS = "models/hotwords.txt"
+    private const val HOTWORDS_SCORE = 2.0f
     private const val SAMPLE_RATE = 16_000
     private const val FEATURE_DIM = 80
 
@@ -50,7 +53,9 @@ object OnnxAsr {
                         numThreads = 2,
                         provider = "cpu",
                     ),
-                )
+                    // 方案B：热词偏置，提高「Fairy」识别概率
+                    hotwordsFile = HOTWORDS,
+                ).apply { hotwordsScore = HOTWORDS_SCORE }
                 recognizer = OfflineRecognizer(context.assets, config)
                 LogFile.d("OnnxAsr.loaded model=paraformer-zh-small")
                 true
@@ -82,7 +87,9 @@ object OnnxAsr {
             stream.acceptWaveform(pcm, SAMPLE_RATE)
             rec.decode(stream)
             val text = rec.getResult(stream).text.trim()
-            if (text.isEmpty()) null else text
+            // 方案A：后处理纠错（ferry/fairy → Fairy），再判空
+            val corrected = AsrCorrection.correct(text)
+            if (corrected.isEmpty()) null else corrected
         } catch (e: Throwable) {
             LogFile.e("OnnxAsr.recognize fail ${e.message}")
             null
