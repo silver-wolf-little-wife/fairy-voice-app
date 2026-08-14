@@ -291,8 +291,8 @@ object VoiceController {
         }.apply { isDaemon = true }.start()
     }
 
-    /** P4：语音结束后调度空闲释放 ASR 模型（延迟后 release，省内存）。 */
-    private fun scheduleAsrRelease() {
+    /** P4：调度空闲释放 ASR 模型（延迟后 release，省内存）。语音结束/App 启动预加载后调用。 */
+    fun scheduleAsrRelease() {
         asrReleaseTask?.let { asrReleaseHandler.removeCallbacks(it) }
         asrReleaseTask = Runnable {
             asrReleaseTask = null

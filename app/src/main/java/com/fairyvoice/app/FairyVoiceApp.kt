@@ -9,6 +9,7 @@ import android.app.Application
 import android.os.Build
 import android.util.Log
 import com.fairyvoice.app.audio.OnnxAsr
+import com.fairyvoice.app.audio.VoiceController
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -31,6 +32,8 @@ class FairyVoiceApp : Application() {
         Thread {
             runCatching { OnnxAsr.ensureLoaded(applicationContext) }
         }.start()
+        // P4：预加载后调度空闲释放（30s 无语音则释放模型省内存；期间有语音会自动保持热）
+        VoiceController.scheduleAsrRelease()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
                 val sw = StringWriter()
