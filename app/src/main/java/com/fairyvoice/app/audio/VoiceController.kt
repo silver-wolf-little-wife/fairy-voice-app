@@ -138,6 +138,21 @@ object VoiceController {
         Thread {
             setState(State.RECOGNIZING)
             try {
+                // P3：识别看门狗——10s 未离开「识别中」则强制恢复，防永久卡死
+                val watchdog = Thread {
+                    try {
+                        Thread.sleep(ASR_TIMEOUT_MS)
+                    } catch (_: InterruptedException) {
+                        return@Thread
+                    }
+                    if (VoiceController.currentState == State.RECOGNIZING) {
+                        LogFile.e("VC.asr watchdog timeout -> force reset")
+                        setState(State.IDLE)
+                        notifyError(IllegalStateException("语音识别超时，请重试"))
+                    }
+                }.apply { isDaemon = true }
+                watchdog.start()
+                LogFile.d("VC.ask start modelLoaded=${OnnxAsr.isLoaded}")
                 // 本地 ASR（懒加载模型）
                 if (!OnnxAsr.ensureLoaded(context)) {
                     LogFile.e("VC.asr model not loaded")
@@ -214,6 +229,9 @@ object VoiceController {
 
     /** M4-1.3.2：ask 前等待 B 端连接就绪的上限。 */
     private const val CONNECT_WAIT_MS = 3_000L
+
+    /** P3：识别看门狗超时（防 ASR 卡死导致永久「识别中」）。 */
+    private const val ASR_TIMEOUT_MS = 10_000L
 
     private const val WAV_HEADER_SIZE = 44L
 }

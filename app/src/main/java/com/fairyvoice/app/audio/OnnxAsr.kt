@@ -82,6 +82,7 @@ object OnnxAsr {
         val rec = recognizer ?: return null
         val pcm = readWavPcm(wavFile) ?: return null
         if (pcm.isEmpty()) return null
+        val t0 = System.currentTimeMillis()
         return try {
             val stream = rec.createStream()
             stream.acceptWaveform(pcm, SAMPLE_RATE)
@@ -89,6 +90,7 @@ object OnnxAsr {
             val text = rec.getResult(stream).text.trim()
             // 方案A：后处理纠错（ferry/fairy → Fairy），再判空
             val corrected = AsrCorrection.correct(text)
+            LogFile.d("OnnxAsr.recognize ${System.currentTimeMillis() - t0}ms text=${corrected.take(30)}")
             if (corrected.isEmpty()) null else corrected
         } catch (e: Throwable) {
             LogFile.e("OnnxAsr.recognize fail ${e.message}")
