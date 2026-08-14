@@ -67,8 +67,6 @@
 
     <!-- M4-1.2：悬浮窗 / 流体云 -->
     <string name="overlay_channel_live">Fairy 状态</string>
-    <!-- P3：息屏/锁屏提醒通道 -->
-    <string name="overlay_channel_heads_up">Fairy 消息</string>
     <string name="overlay_recording">● 录音中…（点击停止）</string>
     <string name="overlay_recognizing">识别中…</string>
     <string name="overlay_waiting_ai">等待 Fairy…</string>

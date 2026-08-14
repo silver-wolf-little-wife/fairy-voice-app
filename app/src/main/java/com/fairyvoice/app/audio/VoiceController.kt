@@ -26,6 +26,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executors
 
 object VoiceController {
 
@@ -50,6 +51,10 @@ object VoiceController {
     private var state = State.IDLE
 
     private val listeners = CopyOnWriteArrayList<Listener>()
+    /** P3：异步广播线程（避免 listener 卡住阻塞识别→发送链路，如对话框 UI 处理）。 */
+    private val broadcastExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "fairy-broadcast").apply { isDaemon = true }
+    }
 
     private var recorder: AudioRecorder? = null
     private val lock = Any()
@@ -163,8 +168,10 @@ object VoiceController {
                     LogFile.d("VC.asr empty -> noSpeech")
                     throw IllegalStateException("未识别到语音，请重试")
                 }
+                LogFile.d("VC.ask asrDone=$text")
                 // P3：识别完成立即通知 UI 显示用户气泡（不等 AI 回复）
                 notifyRecognized(text)
+                LogFile.d("VC.ask notified done")
                 // 等 OneBot 连接就绪
                 var client = OneBotHolder.client
                 var waited = 0L
@@ -202,12 +209,12 @@ object VoiceController {
     private fun notifyRecognized(text: String) {
         // P3：写入全局历史，保证对话页未创建/后台时也记录（磁贴唤醒等场景）
         ChatHistory.add(text, ChatSender.USER)
-        for (l in listeners) l.onRecognized(text)
+        broadcast { it.onRecognized(text) }
     }
 
     private fun notifyReply(text: String, recognized: String?) {
         ChatHistory.add(text, ChatSender.FAIRY)
-        for (l in listeners) l.onReply(text, recognized)
+        broadcast { it.onReply(text, recognized) }
     }
 
     /**
@@ -220,7 +227,17 @@ object VoiceController {
 
     private fun notifyPush(text: String) {
         ChatHistory.add(text, ChatSender.FAIRY)
-        for (l in listeners) l.onPush(text)
+        broadcast { it.onPush(text) }
+    }
+
+    /** 异步广播到所有 listener（快照遍历 + 单线程，避免阻塞语音链路/顺序错乱）。 */
+    private fun broadcast(block: (Listener) -> Unit) {
+        val snapshot = ArrayList(listeners)
+        broadcastExecutor.execute {
+            for (l in snapshot) {
+                runCatching { block(l) }
+            }
+        }
     }
 
     private fun notifyError(e: Exception) {
