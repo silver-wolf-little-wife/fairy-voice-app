@@ -8,6 +8,7 @@ package com.fairyvoice.app
 import android.app.Application
 import android.os.Build
 import android.util.Log
+import com.fairyvoice.app.audio.OnnxAsr
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -26,6 +27,10 @@ class FairyVoiceApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // P3：后台预加载本地 ASR 模型（78MB assets），避免首次语音识别长时间卡「识别中」
+        Thread {
+            runCatching { OnnxAsr.ensureLoaded(applicationContext) }
+        }.start()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
                 val sw = StringWriter()

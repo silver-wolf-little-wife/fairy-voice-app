@@ -130,19 +130,32 @@ class ChatFragment : Fragment() {
         if (text.isEmpty()) return
         etInput.setText("")
         addMessage(ChatMessage(text, Sender.USER))
+        // 文字指令不走 VoiceController 状态机，手动更新左下角状态
+        tvState.text = getString(R.string.voice_state_waiting_ai)
         Thread {
             try {
                 val client = OneBotHolder.client
                 if (client == null || !client.isConnected) throw OneBotException.NotConnected()
                 val reply = client.sendPrivateMessage(text)
-                uiHandler.post { addMessage(ChatMessage(reply, Sender.FAIRY)) }
+                uiHandler.post {
+                    addMessage(ChatMessage(reply, Sender.FAIRY))
+                    updateStateText()
+                }
             } catch (e: Exception) {
-                uiHandler.post { addMessage(ChatMessage("失败：${e.message}", Sender.FAIRY)) }
+                uiHandler.post {
+                    addMessage(ChatMessage("失败：${e.message}", Sender.FAIRY))
+                    updateStateText()
+                }
             }
         }.start()
     }
 
     private fun onMicClick() {
+        // 前置检查连接，避免进入语音链路后长时间等连接
+        if (OneBotHolder.client?.isConnected != true) {
+            Toast.makeText(requireContext(), "未连接 AstrBot，请先在设置页启动连接", Toast.LENGTH_SHORT).show()
+            return
+        }
         val granted = ContextCompat.checkSelfPermission(
             requireContext(), Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
