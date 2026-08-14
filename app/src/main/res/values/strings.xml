@@ -2,6 +2,10 @@
 <resources>
     <string name="app_name">Fairy Voice</string>
 
+    <!-- P3：底部导航 -->
+    <string name="tab_chat">对话</string>
+    <string name="tab_settings">设置</string>
+
     <!-- P1：AstrBot OneBot 直连配置 -->
     <string name="section_server">AstrBot 连接（OneBot）</string>
     <string name="label_server_url">AstrBot 地址（ws://host:6199/ws）</string>
@@ -39,6 +43,7 @@
     <string name="section_test">联调：文本指令（OneBot 上报 → AstrBot 回复）</string>
     <string name="hint_ask_input">输入要发给 Fairy 的指令…</string>
     <string name="btn_send_ask">发送指令</string>
+    <string name="btn_mic">🎤</string>
 
     <string name="section_wake">唤醒方式</string>
     <string name="btn_open_accessibility">开启无障碍服务（实体键唤醒）</string>
@@ -62,6 +67,8 @@
 
     <!-- M4-1.2：悬浮窗 / 流体云 -->
     <string name="overlay_channel_live">Fairy 状态</string>
+    <!-- P3：息屏/锁屏提醒通道 -->
+    <string name="overlay_channel_heads_up">Fairy 消息</string>
     <string name="overlay_recording">● 录音中…（点击停止）</string>
     <string name="overlay_recognizing">识别中…</string>
     <string name="overlay_waiting_ai">等待 Fairy…</string>

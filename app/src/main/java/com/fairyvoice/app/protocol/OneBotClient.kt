@@ -47,8 +47,10 @@ class OneBotClient(
 ) {
     // 可选回调（均在客户端工作线程触发，调用方自行切线程）
     var onReady: (() -> Unit)? = null
-    /** 收到 send_private_msg 回复文本。 */
+    /** 收到 send_private_msg 文本（匹配到 pending 指令 = 指令回复；否则 = AstrBot 主动推送）。 */
     var onReply: ((String) -> Unit)? = null
+    /** AstrBot 主动下发的消息（无 pending 指令时的 send_private_msg）。 */
+    var onPush: ((String) -> Unit)? = null
     var onDisconnect: (() -> Unit)? = null
 
     // 配置快照，供 holder 判断配置变化
@@ -231,8 +233,9 @@ class OneBotClient(
     private fun handleSendMsg(req: OneBotApiRequest) {
         val text = oneBotExtractText(req.params.opt("message"))
         sendApiOk(req, JSONObject().put("message_id", msgId.getAndIncrement()))
-        resolvePending(text)
-        onReply?.invoke(text)
+        // 匹配到 pending 指令 = 指令回复（onReply）；否则 = AstrBot 主动推送（onPush）
+        val matched = resolvePending(text)
+        if (matched) onReply?.invoke(text) else onPush?.invoke(text)
     }
 
     private fun handleGetStrangerInfo(req: OneBotApiRequest) {
@@ -264,10 +267,16 @@ class OneBotClient(
         }
     }
 
-    private fun resolvePending(text: String) {
+    /** 尝试用收到的文本完成 pending 指令；返回是否匹配到了 pending（否则视为主动推送）。 */
+    private fun resolvePending(text: String): Boolean {
         synchronized(pendingLock) {
-            pendingFuture?.complete(text)
-            pendingFuture = null
+            val f = pendingFuture
+            if (f != null) {
+                f.complete(text)
+                pendingFuture = null
+                return true
+            }
+            return false
         }
     }
 

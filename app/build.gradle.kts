@@ -51,6 +51,8 @@ dependencies {
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // P3：对话页聊天列表
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     // P0-4 验证：sherpa-onnx 本地 ASR（AAR 含 onnxruntime + paraformer 推理，见 docs/PLAN_ONEBOT_MIGRATION.md）
     implementation(files("libs/sherpa-onnx-1.13.5.aar"))
 

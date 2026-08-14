@@ -34,6 +34,8 @@ object VoiceController {
         fun onRecorded(file: File, hadSpeech: Boolean)
         /** M4-2：AI 回复回调，recognized 为 B 端 ASR 识别文本（voice_ask 时非空）。 */
         fun onReply(text: String, recognized: String?) {}
+        /** P3：AstrBot 主动推送的消息（无指令时下发）。 */
+        fun onPush(text: String) {}
         fun onError(e: Exception)
     }
 
@@ -178,6 +180,18 @@ object VoiceController {
 
     private fun notifyReply(text: String, recognized: String?) {
         for (l in listeners) l.onReply(text, recognized)
+    }
+
+    /**
+     * P3：把当前 OneBotClient 的主动推送回调挂到 VoiceController（client 重建后需重新调用）。
+     * 由 ConnectionService 在创建 client 后调用。
+     */
+    fun attachPush() {
+        OneBotHolder.client?.onPush = { text -> notifyPush(text) }
+    }
+
+    private fun notifyPush(text: String) {
+        for (l in listeners) l.onPush(text)
     }
 
     private fun notifyError(e: Exception) {

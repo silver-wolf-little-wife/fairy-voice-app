@@ -20,6 +20,7 @@ import androidx.core.app.NotificationCompat
 import com.fairyvoice.app.MainActivity
 import com.fairyvoice.app.OneBotHolder
 import com.fairyvoice.app.R
+import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.protocol.OneBotClient
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.WakeTrigger
@@ -46,6 +47,8 @@ class ConnectionService : Service() {
 
         client = OneBotHolder.createOrGet(astrbotUrl, token, selfId, userId)
         client?.start()
+        // P3：把 OneBotClient 的主动推送回调挂到 VoiceController（息屏/对话页都能收到）
+        VoiceController.attachPush()
         return START_STICKY
     }
 
