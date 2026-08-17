@@ -12,3 +12,5 @@ build*.log
 # Release 签名 keystore（勿提交）
 app/*.jks
 app/*.keystore
+# 本机 agent 工作区配置（勿提交）
+.claude/

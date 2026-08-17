@@ -17,17 +17,16 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.fairyvoice.app.FairyClientHolder
 import com.fairyvoice.app.MainActivity
-import com.fairyvoice.app.OneBotHolder
 import com.fairyvoice.app.R
-import com.fairyvoice.app.audio.VoiceController
-import com.fairyvoice.app.protocol.OneBotClient
+import com.fairyvoice.app.protocol.FairyVoiceClient
 import com.fairyvoice.app.util.Prefs
 import com.fairyvoice.app.wake.WakeTrigger
 
 class ConnectionService : Service() {
 
-    private var client: OneBotClient? = null
+    private var client: FairyVoiceClient? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -39,23 +38,21 @@ class ConnectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val p = Prefs.get(this)
-        // P1：OneBot 直连 AstrBot（aiocqhttp 反向 WS，默认端口 6199）
-        val astrbotUrl = p.getString(Prefs.KEY_ASTRBOT_URL, "ws://192.168.1.100:6199/ws") ?: ""
-        val token = p.getString(Prefs.KEY_ASTRBOT_TOKEN, "") ?: ""
-        val selfId = p.getString(Prefs.KEY_ONEBOT_SELF_ID, "10086") ?: "10086"
-        val userId = p.getString(Prefs.KEY_ONEBOT_USER_ID, "10001") ?: "10001"
+        // fairy-voice 协议 v2.0（PLAN_STREAMING）：直连 B 端 ws_server（默认端口 8765）
+        val url = p.getString(Prefs.KEY_SERVER_URL, "ws://192.168.1.100:8765/ws") ?: ""
+        val token = p.getString(Prefs.KEY_TOKEN, "") ?: ""
+        val deviceId = p.getString(Prefs.KEY_DEVICE_ID, "android-phone") ?: "android-phone"
+        val heartbeatMs = p.getLong(Prefs.KEY_HEARTBEAT_MS, 15_000L)
+        val askTimeoutMs = p.getLong(Prefs.KEY_ASK_TIMEOUT_MS, 60_000L)
 
-        client = OneBotHolder.createOrGet(astrbotUrl, token, selfId, userId)
+        client = FairyClientHolder.createOrGet(url, token, deviceId, heartbeatMs, askTimeoutMs)
         client?.start()
-        // P3：把 OneBotClient 的主动推送回调挂到 VoiceController（息屏/对话页都能收到）
-        VoiceController.attachPush()
-        // P4：把 record 语音回调挂到 VoiceController（TTS 播报）
-        VoiceController.attachTts(this)
+        // fairy-voice 协议 v2.0 无主动推送/TTS 帧（attachPush/attachTts 已随 S4 移除）
         return START_STICKY
     }
 
     override fun onDestroy() {
-        OneBotHolder.clear()
+        FairyClientHolder.clear()
         super.onDestroy()
     }
 

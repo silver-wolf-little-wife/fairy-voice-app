@@ -19,8 +19,8 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.content.ContextCompat
+import com.fairyvoice.app.FairyClientHolder
 import com.fairyvoice.app.MainActivity
-import com.fairyvoice.app.OneBotHolder
 import com.fairyvoice.app.audio.VoiceController
 import com.fairyvoice.app.service.FairyOverlayService
 import com.fairyvoice.app.util.LogFile
@@ -77,7 +77,7 @@ object WakeTrigger {
             return
         }
         // M4-1.3.2：连接常驻中 → 服务直达（不闪界面、不经过 MainActivity）
-        if (OneBotHolder.client != null) {
+        if (FairyClientHolder.client != null) {
             try {
                 val intent = Intent(context, FairyOverlayService::class.java).apply {
                     action = ACTION_FAIRY_OVERLAY_WAKE

@@ -182,7 +182,6 @@ class FairyOverlayService : Service() {
                     VoiceController.State.RECORDING -> getString(R.string.overlay_recording)
                     VoiceController.State.RECOGNIZING -> getString(R.string.overlay_recognizing)
                     VoiceController.State.WAITING_AI -> getString(R.string.overlay_waiting_ai)
-                    VoiceController.State.SPEAKING -> getString(R.string.overlay_speaking)
                     VoiceController.State.IDLE -> {
                         // M4-1.3.1：状态结束清理 Live Update（防「录音中」残留卡死），
                         // 二次兜底取消（ColorOS 流体云取消有延迟，见 hideAll）
@@ -214,6 +213,21 @@ class FairyOverlayService : Service() {
                 }
             }
             // startWake 内部继续走 ASR 占位 → ask，无需处理
+        }
+
+        override fun onStreamDelta(text: String) {
+            // S3：流增量——App 非前台时增量更新悬浮卡片/Live Update（打字机）。
+            // 不 scheduleHide：等 onReply 最终收尾再定时隐藏。
+            uiHandler.post {
+                if (!AppState.foreground) {
+                    lastReply = text
+                    if (shouldShowOverlay()) {
+                        showReplyCard(text)
+                    } else if (shouldPublishLive()) {
+                        updateLiveNotification(getString(R.string.overlay_reply_title), text)
+                    }
+                }
+            }
         }
 
         override fun onReply(text: String, recognized: String?) {
@@ -292,7 +306,6 @@ class FairyOverlayService : Service() {
         val stateText = when (VoiceController.currentState) {
             VoiceController.State.RECOGNIZING -> getString(R.string.overlay_recognizing)
             VoiceController.State.WAITING_AI -> getString(R.string.overlay_waiting_ai)
-            VoiceController.State.SPEAKING -> getString(R.string.overlay_speaking)
             else -> getString(R.string.overlay_recording)
         }
         capsule?.text = stateText

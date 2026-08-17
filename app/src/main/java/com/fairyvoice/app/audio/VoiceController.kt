@@ -6,8 +6,9 @@
  * M4-1.2 增加 [startWake] 唤醒链路。
  * M4-1.3 录音改静音自动停止（AudioRecorder 内置 VAD，说话结束 1.2s 自动停）；
  * 未检测到语音或录音过短视为无效唤醒，不再走 ask 链路。
- * M4-2 接入真实 ASR：录音完成 → RECOGNIZING（sendVoiceAsk，B 端 faster-whisper 识别）
- * → WAITING_AI（B 端 LLM）→ onReply(text, recognized)。SPEAKING 为 M4-3 TTS 预留。
+ * M4-2 接入真实 ASR：录音完成 → RECOGNIZING（本地 ASR 识别）
+ * → WAITING_AI（B 端 LLM）→ onReply(text, recognized)。
+ * S4（PLAN_STREAMING）：砍 TTS，状态机 = IDLE / RECORDING / RECOGNIZING / WAITING_AI。
  * 回调在录音/请求线程触发，Listener 实现方自行切主线程。
  *
  * M4-1.2：Listener 支持多播（MainActivity 与 FairyOverlayService 同时监听），
@@ -16,12 +17,11 @@
 package com.fairyvoice.app.audio
 
 import android.content.Context
-import android.media.MediaPlayer
 import com.fairyvoice.app.ChatHistory
 import com.fairyvoice.app.ChatSender
-import com.fairyvoice.app.OneBotHolder
+import com.fairyvoice.app.FairyClientHolder
 import com.fairyvoice.app.util.LogFile
-import com.fairyvoice.app.protocol.OneBotException
+import com.fairyvoice.app.protocol.FairyVoiceException
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -31,13 +31,17 @@ import java.util.concurrent.Executors
 
 object VoiceController {
 
-    enum class State { IDLE, RECORDING, RECOGNIZING, WAITING_AI, SPEAKING }
+    enum class State { IDLE, RECORDING, RECOGNIZING, WAITING_AI }
 
     interface Listener {
         fun onStateChanged(state: State)
         fun onRecorded(file: File, hadSpeech: Boolean)
         /** P3：ASR 识别完成，识别文本已确定（此时即可显示用户气泡，不必等 AI 回复）。 */
         fun onRecognized(text: String) {}
+        /** S3：AI 回复流开始（已创建流式消息，finalized=false）。 */
+        fun onStreamBegin() {}
+        /** S3：AI 回复增量，text 为累积文本（打字机效果驱动）。 */
+        fun onStreamDelta(text: String) {}
         /** M4-2：AI 回复回调，recognized 为 B 端 ASR 识别文本（voice_ask 时非空）。 */
         fun onReply(text: String, recognized: String?) {}
         /** P3：AstrBot 主动推送的消息（无指令时下发）。 */
@@ -52,13 +56,17 @@ object VoiceController {
     private var state = State.IDLE
 
     private val listeners = CopyOnWriteArrayList<Listener>()
+
+    /** S3：当前进行中的流式回复消息 id（finalized=false），串行单用户场景下至多一个。 */
+    @Volatile private var streamingMsgId: String? = null
+    /** S3：当前流式回复已累积文本（stream_end 缺失完整文本时的兜底）。 */
+    @Volatile private var streamingLastText: String = ""
     /** P3：异步广播线程（避免 listener 卡住阻塞识别→发送链路，如对话框 UI 处理）。 */
     private val broadcastExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "fairy-broadcast").apply { isDaemon = true }
     }
 
     private var recorder: AudioRecorder? = null
-    private var player: MediaPlayer? = null
     private val lock = Any()
 
     val currentState: State get() = state
@@ -85,15 +93,8 @@ object VoiceController {
     fun startRecording(context: Context, autoAsk: Boolean) {
         synchronized(lock) {
             if (state != State.IDLE) {
-                // P4：播报中再按 = 打断播报并重新录音
-                if (state == State.SPEAKING) {
-                    LogFile.d("VC.startRecording interrupt SPEAKING")
-                    stopTts()
-                    setState(State.IDLE)
-                } else {
-                    LogFile.d("VC.startRecording skipped state=$state")
-                    return
-                }
+                LogFile.d("VC.startRecording skipped state=$state")
+                return
             }
             LogFile.d("VC.startRecording autoAsk=$autoAsk")
             val dir = File(context.filesDir, "recordings").apply { mkdirs() }
@@ -150,6 +151,7 @@ object VoiceController {
      */
     private fun askWithVoice(context: Context, file: File) {
         Thread {
+            var recognizedText: String? = null
             setState(State.RECOGNIZING)
             try {
                 // P3：识别看门狗——10s 未离开「识别中」则强制恢复，防永久卡死
@@ -177,33 +179,84 @@ object VoiceController {
                     LogFile.d("VC.asr empty -> noSpeech")
                     throw IllegalStateException("未识别到语音，请重试")
                 }
+                recognizedText = text
                 LogFile.d("VC.ask asrDone=$text")
                 // P3：识别完成立即通知 UI 显示用户气泡（不等 AI 回复）
                 notifyRecognized(text)
                 LogFile.d("VC.ask notified done")
-                // 等 OneBot 连接就绪
-                var client = OneBotHolder.client
+                // 等 B 端连接就绪
+                var client = FairyClientHolder.client
                 var waited = 0L
                 while ((client == null || !client.isConnected) && waited < CONNECT_WAIT_MS) {
                     Thread.sleep(200)
                     waited += 200
-                    client = OneBotHolder.client
+                    client = FairyClientHolder.client
                 }
                 if (client == null || !client.isConnected) {
                     LogFile.e("VC.ask notConnected waited=$waited")
-                    throw OneBotException.NotConnected("未连接 AstrBot，先启动连接")
+                    throw FairyVoiceException.NotConnected("未连接 B 端，先启动连接")
                 }
                 setState(State.WAITING_AI)
                 LogFile.d("VC.ask text=$text waited=$waited")
-                val reply = client.sendPrivateMessage(text)
-                setState(State.IDLE)
-                LogFile.d("VC.ask reply len=${reply.length}")
-                notifyReply(reply, text)
+                // S3：挂 FairyVoiceClient 流式回调（单用户串行，发起前设置安全），驱动流式消息增量上屏
+                streamingMsgId = null
+                streamingLastText = ""
+                client.onStreamBegin = { _, _ ->
+                    LogFile.d("VC.stream begin")
+                    beginStreaming()
+                }
+                client.onStreamDelta = { _, delta ->
+                    onStreamDeltaAppend(delta)
+                }
+                client.onStreamEnd = { _, ok, full ->
+                    LogFile.d("VC.stream end ok=$ok fullLen=${full?.length}")
+                    onStreamEnded(full, text)
+                }
+                // 阻塞返回完整文本；UI 由上方回调驱动，返回值仅兜底日志
+                val resp = client.sendAsk(text)
+                LogFile.d("VC.ask done respOk=${resp.ok} textLen=${resp.text?.length}")
             } catch (e: Exception) {
                 setState(State.IDLE)
-                notifyError(e)
+                // 流式消息已开始但未收尾（首 token/整体超时、连接断开且未走回调）→ 以已收文本 + 失败标记收尾，避免消息悬挂
+                val id = synchronized(lock) { streamingMsgId }
+                if (id != null && recognizedText != null) {
+                    LogFile.e("VC.ask err during stream ${e.message}")
+                    notifyReply(streamingLastText + "\n\n（失败：${e.message}）", recognizedText)
+                } else {
+                    notifyError(e)
+                }
             }
         }.start()
+    }
+
+    // ---------- S3 流式消息辅助 ----------
+
+    /** 流开始：创建 FAIRY 流式消息（finalized=false），广播 onStreamBegin。 */
+    private fun beginStreaming() {
+        synchronized(lock) {
+            if (streamingMsgId != null) return
+            val m = ChatHistory.addStreaming(ChatSender.FAIRY)
+            streamingMsgId = m.id
+            streamingLastText = ""
+        }
+        broadcast { it.onStreamBegin() }
+    }
+
+    /** 流增量：追加到当前流式消息，广播累积文本（打字机驱动）。 */
+    private fun onStreamDeltaAppend(delta: String) {
+        val id = synchronized(lock) { streamingMsgId }
+        if (id == null) return
+        ChatHistory.appendStreaming(id, delta)
+        val cur = ChatHistory.messages.firstOrNull { it.id == id }?.text ?: return
+        streamingLastText = cur
+        broadcast { it.onStreamDelta(cur) }
+    }
+
+    /** 流结束：finalize 流式消息（data.text 完整兜底），广播最终回复。 */
+    private fun onStreamEnded(fullText: String?, recognized: String?) {
+        setState(State.IDLE)
+        notifyReply(fullText ?: streamingLastText, recognized)
+        streamingLastText = ""
     }
 
     private fun setState(s: State) {
@@ -222,72 +275,15 @@ object VoiceController {
     }
 
     private fun notifyReply(text: String, recognized: String?) {
-        ChatHistory.add(text, ChatSender.FAIRY)
+        // 有进行中的流式消息 → finalize（不重复 add）；否则直接 add（非流式兜底）
+        val id = synchronized(lock) { streamingMsgId }
+        streamingMsgId = null
+        if (id != null) {
+            ChatHistory.finalizeStreaming(id, text)
+        } else {
+            ChatHistory.add(text, ChatSender.FAIRY)
+        }
         broadcast { it.onReply(text, recognized) }
-    }
-
-    /**
-     * P3：把当前 OneBotClient 的主动推送回调挂到 VoiceController（client 重建后需重新调用）。
-     * 由 ConnectionService 在创建 client 后调用。
-     */
-    fun attachPush() {
-        OneBotHolder.client?.onPush = { text -> notifyPush(text) }
-    }
-
-    /**
-     * P4 TTS：把 OneBotClient 的 record 语音回调挂到 VoiceController（client 重建后需重新调用）。
-     * 收到音频 → 播放 → SPEAKING → 播完 IDLE。
-     */
-    fun attachTts(context: Context) {
-        val appCtx = context.applicationContext
-        OneBotHolder.client?.onTts = { audioBytes ->
-            playTts(appCtx, audioBytes)
-        }
-    }
-
-    /** 播放 TTS 音频（后台线程）；播完/失败回 IDLE。 */
-    private fun playTts(context: Context, audioBytes: ByteArray) {
-        Thread {
-            try {
-                stopTts()
-                setState(State.SPEAKING)
-                val f = File(context.cacheDir, "fairy_tts_${System.currentTimeMillis()}.mp3")
-                f.writeBytes(audioBytes)
-                val mp = MediaPlayer()
-                mp.setDataSource(f.absolutePath)
-                mp.setOnCompletionListener {
-                    runCatching { mp.release() }
-                    f.delete()
-                    player = null
-                    setState(State.IDLE)
-                }
-                mp.setOnErrorListener { _, _, _ ->
-                    runCatching { mp.release() }
-                    f.delete()
-                    player = null
-                    setState(State.IDLE)
-                    true
-                }
-                mp.prepare()
-                mp.start()
-                player = mp
-                LogFile.d("VC.tts start ${audioBytes.size}B")
-            } catch (e: Exception) {
-                LogFile.e("VC.tts fail ${e.message}")
-                setState(State.IDLE)
-            }
-        }.apply { isDaemon = true }.start()
-    }
-
-    /** 打断当前 TTS 播报。 */
-    fun stopTts() {
-        synchronized(lock) {
-            player?.let {
-                runCatching { it.stop() }
-                runCatching { it.release() }
-            }
-            player = null
-        }
     }
 
     private fun notifyPush(text: String) {

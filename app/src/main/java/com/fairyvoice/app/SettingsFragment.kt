@@ -30,7 +30,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import com.fairyvoice.app.audio.VoiceController
-import com.fairyvoice.app.protocol.OneBotException
+import com.fairyvoice.app.protocol.FairyVoiceException
 import com.fairyvoice.app.service.ConnectionService
 import com.fairyvoice.app.service.FairyOverlayService
 import com.fairyvoice.app.util.LogFile
@@ -195,7 +195,7 @@ class SettingsFragment : Fragment() {
         startRequested = false
         ConnectionService.stop(requireContext())
         FairyOverlayService.stop(requireContext())
-        OneBotHolder.clear()
+        FairyClientHolder.clear()
         refreshStatus()
     }
 
@@ -220,17 +220,17 @@ class SettingsFragment : Fragment() {
             Toast.makeText(requireContext(), "先输入指令文本", Toast.LENGTH_SHORT).show()
             return
         }
-        val client = OneBotHolder.client
+        val client = FairyClientHolder.client
         if (client == null || !client.isConnected) {
-            tvReply.text = "未连接 AstrBot，先启动连接"
+            tvReply.text = "未连接 B 端，先启动连接"
             return
         }
         tvReply.text = "等待 Fairy 回复…"
         Thread {
             try {
-                val reply = client.sendPrivateMessage(text)
-                uiHandler.post { tvReply.text = "Fairy：$reply" }
-            } catch (e: OneBotException) {
+                val reply = client.sendAsk(text)
+                uiHandler.post { tvReply.text = "Fairy：${reply.text}" }
+            } catch (e: FairyVoiceException) {
                 uiHandler.post { tvReply.text = "失败：${e.message}" }
             }
         }.start()
@@ -286,17 +286,17 @@ class SettingsFragment : Fragment() {
                 VoiceController.State.RECORDING -> R.string.voice_state_recording
                 VoiceController.State.RECOGNIZING -> R.string.voice_state_recognizing
                 VoiceController.State.WAITING_AI -> R.string.voice_state_waiting_ai
-                VoiceController.State.SPEAKING -> R.string.voice_state_speaking
             }
         )
     }
 
     private fun loadPrefsIntoUi() {
         val p = Prefs.get(requireContext())
-        etServerUrl.setText(p.getString(Prefs.KEY_ASTRBOT_URL, "ws://192.168.1.100:6199/ws"))
-        etToken.setText(p.getString(Prefs.KEY_ASTRBOT_TOKEN, ""))
-        etSelfId.setText(p.getString(Prefs.KEY_ONEBOT_SELF_ID, "10086"))
-        etUserId.setText(p.getString(Prefs.KEY_ONEBOT_USER_ID, "10001"))
+        etServerUrl.setText(p.getString(Prefs.KEY_SERVER_URL, "ws://192.168.1.100:8765/ws"))
+        etToken.setText(p.getString(Prefs.KEY_TOKEN, ""))
+        etSelfId.setText(p.getString(Prefs.KEY_DEVICE_ID, "android-phone"))
+        // fairy-voice 协议无 user_id 概念，隐藏该输入框
+        etUserId.visibility = View.GONE
         when (p.getString(Prefs.KEY_OVERLAY_MODE, Prefs.OVERLAY_MODE_AUTO)) {
             Prefs.OVERLAY_MODE_OVERLAY -> view?.findViewById<RadioGroup>(R.id.rgOverlayMode)?.check(R.id.rbOverlayOverlay)
             Prefs.OVERLAY_MODE_LIVE -> view?.findViewById<RadioGroup>(R.id.rgOverlayMode)?.check(R.id.rbOverlayLive)
@@ -306,15 +306,14 @@ class SettingsFragment : Fragment() {
 
     private fun saveUiToPrefs() {
         val p = Prefs.get(requireContext()).edit()
-        p.putString(Prefs.KEY_ASTRBOT_URL, etServerUrl.text.toString().trim())
-        p.putString(Prefs.KEY_ASTRBOT_TOKEN, etToken.text.toString().trim())
-        p.putString(Prefs.KEY_ONEBOT_SELF_ID, etSelfId.text.toString().trim().ifEmpty { "10086" })
-        p.putString(Prefs.KEY_ONEBOT_USER_ID, etUserId.text.toString().trim().ifEmpty { "10001" })
+        p.putString(Prefs.KEY_SERVER_URL, etServerUrl.text.toString().trim())
+        p.putString(Prefs.KEY_TOKEN, etToken.text.toString().trim())
+        p.putString(Prefs.KEY_DEVICE_ID, etSelfId.text.toString().trim().ifEmpty { "android-phone" })
         p.apply()
     }
 
     private fun refreshStatus() {
-        val client = OneBotHolder.client
+        val client = FairyClientHolder.client
         tvStatus.text = when {
             client?.isConnected == true -> getString(R.string.status_connected)
             client != null || startRequested -> getString(R.string.status_connecting)

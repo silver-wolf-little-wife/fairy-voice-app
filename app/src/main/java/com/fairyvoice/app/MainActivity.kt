@@ -170,10 +170,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun autoConnectIfNeeded() {
-        if (OneBotHolder.client?.isConnected == true) return
+        if (FairyClientHolder.client?.isConnected == true) return
         val p = Prefs.get(this)
-        val astrbotUrl = p.getString(Prefs.KEY_ASTRBOT_URL, "") ?: ""
-        if (astrbotUrl.isBlank()) return
+        val url = p.getString(Prefs.KEY_SERVER_URL, "") ?: ""
+        if (url.isBlank()) return
         ConnectionService.start(this)
         FairyOverlayService.ensureRunning(this)
     }

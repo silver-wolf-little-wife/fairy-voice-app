@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
- * B 端 WebSocket 客户端（fairy-voice 协议 v1.0.0）。
+ * B 端 WebSocket 客户端（fairy-voice 协议 v2.0 流式）。
  *
  * 职责（对应 Python 版 ws_client.py）：
  * - 主动外连 B 端（穿透 NAT），hello 握手 → 心跳 → ask 请求/响应。
  * - 断线指数退避重连（1s → 60s 封顶）。
- * - 纯终端：只发指令文本、收 AI 回复，无任何 AI 逻辑。
+ * - v2.0 流式：ask / voice_ask 默认走流式（stream_begin / stream_delta / stream_end），
+ *   通过 [onStreamBegin]/[onStreamDelta]/[onStreamEnd] 实时回调；阻塞返回在 stream_end 时完成，
+ *   data.text 为完整回复。单帧 response 仅作 B 端非流式兜底保留。
+ * - 断流兜底：已收到 stream_begin 但未收 stream_end 时连接断开 → 以已收 delta 拼接 + 标记「已中断」。
  *
  * 纯 Kotlin + OkHttp，不依赖 Android API，可在 JVM 单测（MockWebServer）。
  */
@@ -43,12 +46,30 @@ class FairyVoiceClient(
     private val askTimeoutMs: Long = 60_000,
     private val maxReconnectDelayMs: Long = 60_000,
     private val handshakeTimeoutMs: Long = 10_000,
+    /**
+     * 首 token 超时（对齐 CherryStudio IdleTimeoutController 的流式健壮性）。
+     * 发送 ask 后，LLM 迟迟不吐第一个 token（未收 stream_begin/response）超过该时长 → 该请求失败。
+     */
+    private val firstTokenTimeoutMs: Long = 30_000,
+    /**
+     * 流式增量间空闲超时。已开始流式（收到 stream_begin）后，相邻 delta 间隔超过该时长
+     * → 判定 B 端卡死/断流，以已收 delta 拼接 + 标记「已中断」收尾（已收内容完整可读）。
+     */
+    private val idleTimeoutMs: Long = 15_000,
 ) {
     // 可选回调（均在客户端工作线程触发，调用方自行切线程）
     var onReady: (() -> Unit)? = null
     var onReply: ((String) -> Unit)? = null
     var onDisconnect: (() -> Unit)? = null
     var onAuthError: ((String) -> Unit)? = null
+
+    // v2.0 流式回调（按 id 关联）
+    /** 流开始：该 id 进入流式状态；voice_ask 时 recognized 为识别文本，ask 为 null。 */
+    var onStreamBegin: ((id: String, recognized: String?) -> Unit)? = null
+    /** 流增量：delta 为增量文本片段，直接追加展示。 */
+    var onStreamDelta: ((id: String, delta: String) -> Unit)? = null
+    /** 流结束：ok=true 且 text 为完整回复；ok=false 表示流中途失败（text 为已收部分）。 */
+    var onStreamEnd: ((id: String, ok: Boolean, text: String?) -> Unit)? = null
 
     /** 当前实例的配置快照，供 FairyClientHolder 判断配置是否变化（变化则重建）。 */
     val serverUrlValue: String get() = serverUrl
@@ -65,6 +86,20 @@ class FairyVoiceClient(
 
     @Volatile private var ws: WebSocket? = null
     private val pending = ConcurrentHashMap<String, CompletableFuture<ResponseFrame>>()
+
+    /** v2.0 流式聚合状态：已收到 stream_begin 但尚未收 stream_end 的 id → 增量文本拼接。 */
+    private val streaming = ConcurrentHashMap<String, StringBuilder>()
+    /**
+     * v2.0 流式聚合状态：stream_begin 携带的 recognized（voice_ask 时非空）。
+     * 注意：ConcurrentHashMap 不允许 null value，recognized 为 null 时不存入。
+     */
+    private val streamingRecognized = ConcurrentHashMap<String, String>()
+
+    /** 首 token 超时计时器（按 id）。 */
+    private val firstTokenTimers = ConcurrentHashMap<String, ScheduledFuture<*>>()
+    /** 流式增量间空闲超时计时器（按 id）。 */
+    private val idleTimers = ConcurrentHashMap<String, ScheduledFuture<*>>()
+
     @Volatile private var stopped = false
     @Volatile private var connected = false
     private var heartbeatTask: ScheduledFuture<*>? = null
@@ -158,10 +193,27 @@ class FairyVoiceClient(
                     }
                     return
                 }
-                // 已握手：只处理 response
-                if (text.contains("\"response\"")) {
-                    val frame = ResponseFrame.parse(text)
-                    if (frame.id.isNotEmpty()) resolvePending(frame)
+                // 已握手：处理流式帧（v2.0）与非流式 response 兜底。
+                // 单帧解析异常不应中断 WS 读线程（否则后续 delta 丢失），吞掉并继续。
+                runCatching {
+                    when {
+                        text.contains("\"stream_begin\"") -> {
+                            val frame = StreamBeginFrame.parse(text)
+                            if (frame.id.isNotEmpty()) handleStreamBegin(frame)
+                        }
+                        text.contains("\"stream_delta\"") -> {
+                            val frame = StreamDeltaFrame.parse(text)
+                            if (frame.id.isNotEmpty()) handleStreamDelta(frame)
+                        }
+                        text.contains("\"stream_end\"") -> {
+                            val frame = StreamEndFrame.parse(text)
+                            if (frame.id.isNotEmpty()) handleStreamEnd(frame)
+                        }
+                        text.contains("\"response\"") -> {
+                            val frame = ResponseFrame.parse(text)
+                            if (frame.id.isNotEmpty()) resolvePending(frame)
+                        }
+                    }
                 }
             }
 
@@ -227,17 +279,18 @@ class FairyVoiceClient(
         val id = UUID.randomUUID().toString()
         val fut = CompletableFuture<ResponseFrame>()
         pending[id] = fut
+        startFirstTokenTimer(id, fut)
         if (!sock.send(askFrame(id, text, lang))) {
-            pending.remove(id)
+            cleanupRequest(id)
             throw FairyVoiceException.NotConnected()
         }
         return try {
             fut.get(askTimeoutMs, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
-            pending.remove(id)
+            cleanupRequest(id)
             throw FairyVoiceException.AskError("timeout", "等待 B 端响应超时")
         } catch (e: ExecutionException) {
-            pending.remove(id)
+            cleanupRequest(id)
             val cause = e.cause
             throw when (cause) {
                 is FairyVoiceException -> cause
@@ -245,7 +298,7 @@ class FairyVoiceClient(
             }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            pending.remove(id)
+            cleanupRequest(id)
             throw FairyVoiceException.NotConnected("已中断")
         }
     }
@@ -258,17 +311,18 @@ class FairyVoiceClient(
         val id = UUID.randomUUID().toString()
         val fut = CompletableFuture<ResponseFrame>()
         pending[id] = fut
+        startFirstTokenTimer(id, fut)
         if (!sock.send(voiceAskFrame(id, audioBase64, lang))) {
-            pending.remove(id)
+            cleanupRequest(id)
             throw FairyVoiceException.NotConnected()
         }
         return try {
             fut.get(askTimeoutMs, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
-            pending.remove(id)
+            cleanupRequest(id)
             throw FairyVoiceException.AskError("timeout", "等待 B 端响应超时")
         } catch (e: ExecutionException) {
-            pending.remove(id)
+            cleanupRequest(id)
             val cause = e.cause
             throw when (cause) {
                 is FairyVoiceException -> cause
@@ -276,14 +330,122 @@ class FairyVoiceClient(
             }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            pending.remove(id)
+            cleanupRequest(id)
             throw FairyVoiceException.NotConnected("已中断")
         }
     }
 
-    // ---------- 内部 ----------
+    // ---------- 流式超时看门狗（对齐 CherryStudio IdleTimeoutController） ----------
+
+    /** 启动首 token 计时器：发送 ask 后 LLM 迟迟不吐首 token（未收 stream_begin/response）→ 该请求失败。 */
+    private fun startFirstTokenTimer(id: String, fut: CompletableFuture<ResponseFrame>) {
+        cancelFirstTokenTimer(id)
+        val task = heartbeatExecutor.schedule({
+            firstTokenTimers.remove(id)
+            onFirstTokenTimeout(id)
+        }, firstTokenTimeoutMs, TimeUnit.MILLISECONDS)
+        firstTokenTimers[id] = task
+    }
+
+    /** 首 token 超时：请求未开始流式即超时，按失败处理（区别于断流兜底）。 */
+    private fun onFirstTokenTimeout(id: String) {
+        val fut = pending.remove(id) ?: return // 已被其他路径处理（收到 begin/end/response）
+        streaming.remove(id)
+        streamingRecognized.remove(id)
+        if (!fut.isDone) {
+            fut.completeExceptionally(FairyVoiceException.AskError("timeout", "等待 B 端首 token 超时"))
+        }
+    }
+
+    private fun cancelFirstTokenTimer(id: String) {
+        firstTokenTimers.remove(id)?.cancel(false)
+    }
+
+    /** 启动/重置空闲计时器：流式进行中相邻 delta 间隔超时 → 以已收 delta 拼接收尾（已中断）。 */
+    private fun startIdleTimer(id: String) {
+        cancelIdleTimer(id)
+        val task = heartbeatExecutor.schedule({
+            idleTimers.remove(id)
+            onIdleTimeout(id)
+        }, idleTimeoutMs, TimeUnit.MILLISECONDS)
+        idleTimers[id] = task
+    }
+
+    /** 每次增量到达重置空闲计时。 */
+    private fun resetIdleTimer(id: String) = startIdleTimer(id)
+
+    /** 空闲超时：流中途无新 delta，判定 B 端卡死/断流，已收内容完整保留。 */
+    private fun onIdleTimeout(id: String) {
+        val fut = pending.remove(id) ?: return // 已被 stream_end/断流等处理
+        val sb = streaming.remove(id)
+        streamingRecognized.remove(id)
+        val partial = sb?.toString() ?: ""
+        onStreamEnd?.invoke(id, false, partial)
+        if (!fut.isDone) {
+            fut.complete(ResponseFrame(id, true, partial + "\n\n（已中断）", null, null, null))
+        }
+    }
+
+    private fun cancelIdleTimer(id: String) {
+        idleTimers.remove(id)?.cancel(false)
+    }
+
+    /** 清理某个请求的全部看门狗计时器。 */
+    private fun cancelTimers(id: String) {
+        cancelFirstTokenTimer(id)
+        cancelIdleTimer(id)
+    }
+
+    // ---------- 内部（v2.0 流式） ----------
+
+    /** 流开始：登记聚合状态，取消首 token 计时，启动空闲看门狗。 */
+    private fun handleStreamBegin(frame: StreamBeginFrame) {
+        streaming.putIfAbsent(frame.id, StringBuilder())
+        if (frame.recognized != null) {
+            streamingRecognized[frame.id] = frame.recognized
+        } else {
+            streamingRecognized.remove(frame.id)
+        }
+        cancelFirstTokenTimer(frame.id)
+        startIdleTimer(frame.id)
+        onStreamBegin?.invoke(frame.id, frame.recognized)
+    }
+
+    /** 流增量：追加到聚合缓冲，重置空闲看门狗。 */
+    private fun handleStreamDelta(frame: StreamDeltaFrame) {
+        streaming[frame.id]?.append(frame.delta)
+        resetIdleTimer(frame.id)
+        onStreamDelta?.invoke(frame.id, frame.delta)
+    }
+
+    /** 流结束：ok=true 以 data.text 为准完成；ok=false 以已收 delta + 错误完成。 */
+    private fun handleStreamEnd(frame: StreamEndFrame) {
+        cancelIdleTimer(frame.id)
+        val sb = streaming.remove(frame.id)
+        val recognized = streamingRecognized.remove(frame.id)
+        val accumulated = sb?.toString()
+        val fut = pending.remove(frame.id)
+        if (frame.ok) {
+            // data.text 为完整回复，可修复丢帧；缺失时回退到 delta 拼接
+            val full = frame.text ?: accumulated ?: ""
+            // 先回调后 complete：保证阻塞返回时所有流式回调已执行完（调用方可直接读状态）
+            onStreamEnd?.invoke(frame.id, true, full)
+            onReply?.invoke(full)
+            if (fut != null && !fut.isDone) {
+                fut.complete(ResponseFrame(frame.id, true, full, recognized, null, null))
+            }
+        } else {
+            val code = frame.errorCode ?: "llm_error"
+            val msg = frame.errorMessage ?: "流式生成失败"
+            onStreamEnd?.invoke(frame.id, false, accumulated)
+            if (fut != null && !fut.isDone) {
+                fut.completeExceptionally(FairyVoiceException.AskError(code, msg))
+            }
+        }
+    }
 
     private fun resolvePending(frame: ResponseFrame) {
+        cancelTimers(frame.id)
         val fut = pending.remove(frame.id) ?: return
         if (!fut.isDone) {
             fut.complete(frame)
@@ -291,7 +453,35 @@ class FairyVoiceClient(
         }
     }
 
+    /** 清理单个请求的挂起/流式状态与看门狗（发送失败 / 超时 / 中断时）。 */
+    private fun cleanupRequest(id: String) {
+        cancelTimers(id)
+        pending.remove(id)
+        streaming.remove(id)
+        streamingRecognized.remove(id)
+    }
+
+    /**
+     * 断线/停止时清理所有挂起请求。
+     * 已开始流式但未收 stream_end 的：以已收 delta 拼接 + 标记「已中断」，视为可读结果完成，
+     * 保证流中断时已收内容完整可用；其余未开始的直接失败。
+     */
     private fun failAllPending(reason: FairyVoiceException) {
+        firstTokenTimers.values.forEach { it.cancel(false) }
+        firstTokenTimers.clear()
+        idleTimers.values.forEach { it.cancel(false) }
+        idleTimers.clear()
+        streaming.forEach { (id, sb) ->
+            val fut = pending.remove(id)
+            streamingRecognized.remove(id)
+            val partial = sb.toString()
+            // 先回调后 complete：阻塞返回时 onStreamEnd 已触发
+            onStreamEnd?.invoke(id, false, partial)
+            if (fut != null && !fut.isDone) {
+                fut.complete(ResponseFrame(id, true, partial + "\n\n（已中断）", null, null, null))
+            }
+        }
+        streaming.clear()
         pending.values.forEach { fut ->
             if (!fut.isDone) fut.completeExceptionally(reason)
         }

@@ -14,7 +14,7 @@ class ProtocolTest {
         assertTrue(raw.contains("\"type\":\"hello\""))
         assertTrue(raw.contains("\"token\":\"t0k3n\""))
         assertTrue(raw.contains("\"device_id\":\"dev-1\""))
-        assertTrue(raw.contains("\"client_version\":\"0.1.0\""))
+        assertTrue(raw.contains("\"client_version\":\"0.2.0\""))
     }
 
     @Test
@@ -88,5 +88,55 @@ class ProtocolTest {
         assertFalse(frame.ok)
         assertEquals("llm_error", frame.errorCode)
         assertEquals("boom", frame.errorMessage)
+    }
+
+    // ---------- v2.0 流式帧 ----------
+
+    @Test
+    fun `StreamBeginFrame parse carries recognized`() {
+        val raw = """{"type":"stream_begin","id":"abc","recognized":"今天天气怎么样"}"""
+        val frame = StreamBeginFrame.parse(raw)
+        assertEquals("abc", frame.id)
+        assertEquals("今天天气怎么样", frame.recognized)
+    }
+
+    @Test
+    fun `StreamBeginFrame without recognized keeps null`() {
+        val frame = StreamBeginFrame.parse("""{"type":"stream_begin","id":"abc"}""")
+        assertEquals("abc", frame.id)
+        assertEquals(null, frame.recognized)
+    }
+
+    @Test
+    fun `StreamDeltaFrame parse carries delta`() {
+        val frame = StreamDeltaFrame.parse("""{"type":"stream_delta","id":"abc","delta":"明天"}""")
+        assertEquals("abc", frame.id)
+        assertEquals("明天", frame.delta)
+    }
+
+    @Test
+    fun `StreamEndFrame parse ok carries full text`() {
+        val raw = """{"type":"stream_end","id":"abc","ok":true,"data":{"text":"明天晴，23~31℃。"}}"""
+        val frame = StreamEndFrame.parse(raw)
+        assertEquals("abc", frame.id)
+        assertTrue(frame.ok)
+        assertEquals("明天晴，23~31℃。", frame.text)
+        assertEquals(null, frame.errorCode)
+    }
+
+    @Test
+    fun `StreamEndFrame parse error carries code`() {
+        val raw = """{"type":"stream_end","id":"abc","ok":false,"data":null,"error":{"code":"llm_error","message":"boom"}}"""
+        val frame = StreamEndFrame.parse(raw)
+        assertFalse(frame.ok)
+        assertEquals("llm_error", frame.errorCode)
+        assertEquals("boom", frame.errorMessage)
+        assertEquals(null, frame.text)
+    }
+
+    @Test
+    fun `StreamEndFrame parse garbage is safe`() {
+        val frame = StreamEndFrame.parse("not-json")
+        assertFalse(frame.ok)
     }
 }

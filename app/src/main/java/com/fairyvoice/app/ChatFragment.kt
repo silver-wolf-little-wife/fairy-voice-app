@@ -25,7 +25,7 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.fairyvoice.app.audio.VoiceController
-import com.fairyvoice.app.protocol.OneBotException
+import com.fairyvoice.app.protocol.FairyVoiceException
 import java.io.File
 
 class ChatFragment : Fragment() {
@@ -66,6 +66,16 @@ class ChatFragment : Fragment() {
         override fun onRecognized(text: String) {
             // 历史已由 VoiceController 写入，这里只刷新 UI
             uiHandler.post { notifyNewMessage() }
+        }
+
+        override fun onStreamBegin() {
+            // 流式 FAIRY 消息已插入历史，追加一条气泡
+            uiHandler.post { notifyNewMessage() }
+        }
+
+        override fun onStreamDelta(text: String) {
+            // 历史由 VoiceController 增量更新，这里只刷新最后一条（打字机）
+            uiHandler.post { refreshLastItem() }
         }
 
         override fun onReply(text: String, recognized: String?) {
@@ -134,28 +144,76 @@ class ChatFragment : Fragment() {
         addMessage(text, ChatSender.USER)
         // 文字指令不走 VoiceController 状态机，手动更新左下角状态
         tvState.text = getString(R.string.voice_state_waiting_ai)
+        val client = FairyClientHolder.client
+        if (client == null || !client.isConnected) {
+            addMessage("失败：未连接 B 端", ChatSender.FAIRY)
+            updateStateText()
+            return
+        }
+        // S3：流式发送——先插入 finalized=false 的消息，增量经回调逐段上屏（打字机）
+        val msg = ChatHistory.addStreaming(ChatSender.FAIRY)
+        adapter.notifyItemInserted(messages.size - 1)
+        rvChat.scrollToPosition(messages.size - 1)
+
+        client.onStreamBegin = { _, _ -> }
+        client.onStreamDelta = { _, delta ->
+            ChatHistory.appendStreaming(msg.id, delta)
+            uiHandler.post { refreshItem(msg) }
+        }
+        client.onStreamEnd = { _, ok, full ->
+            ChatHistory.finalizeStreaming(msg.id, full ?: msg.text)
+            uiHandler.post {
+                refreshItem(msg)
+                updateStateText()
+            }
+        }
         Thread {
             try {
-                val client = OneBotHolder.client
-                if (client == null || !client.isConnected) throw OneBotException.NotConnected()
-                val reply = client.sendPrivateMessage(text)
-                uiHandler.post {
-                    addMessage(reply, ChatSender.FAIRY)
-                    updateStateText()
+                val resp = client.sendAsk(text)
+                // 回调已驱动 UI；onStreamEnd 极端未触发时（如 B 端直接 response 帧）兜底 finalize
+                val m = messages.firstOrNull { it.id == msg.id }
+                if (m != null && !m.finalized) {
+                    ChatHistory.finalizeStreaming(msg.id, resp.text ?: msg.text)
+                    uiHandler.post {
+                        refreshItem(msg)
+                        updateStateText()
+                    }
                 }
             } catch (e: Exception) {
                 uiHandler.post {
-                    addMessage("失败：${e.message}", ChatSender.FAIRY)
+                    if (!msg.finalized) {
+                        ChatHistory.finalizeStreaming(msg.id, msg.text + "\n\n（失败：${e.message}）")
+                        refreshItem(msg)
+                    } else {
+                        addMessage("失败：${e.message}", ChatSender.FAIRY)
+                    }
                     updateStateText()
                 }
             }
         }.start()
     }
 
+    /** 仅刷新指定消息对应位置（流式增量/收尾）。 */
+    private fun refreshItem(msg: ChatMessage) {
+        val pos = messages.indexOf(msg)
+        if (pos >= 0) {
+            adapter.notifyItemChanged(pos)
+            rvChat.scrollToPosition(pos)
+        }
+    }
+
+    /** 刷新最后一条（VoiceController 流式增量，finalized=false 的消息就是最后一条）。 */
+    private fun refreshLastItem() {
+        if (messages.isEmpty()) return
+        val pos = messages.size - 1
+        adapter.notifyItemChanged(pos)
+        rvChat.scrollToPosition(pos)
+    }
+
     private fun onMicClick() {
         // 前置检查连接，避免进入语音链路后长时间等连接
-        if (OneBotHolder.client?.isConnected != true) {
-            Toast.makeText(requireContext(), "未连接 AstrBot，请先在设置页启动连接", Toast.LENGTH_SHORT).show()
+        if (FairyClientHolder.client?.isConnected != true) {
+            Toast.makeText(requireContext(), "未连接 B 端，请先在设置页启动连接", Toast.LENGTH_SHORT).show()
             return
         }
         val granted = ContextCompat.checkSelfPermission(
@@ -182,7 +240,7 @@ class ChatFragment : Fragment() {
     }
 
     private fun refreshStatus() {
-        val client = OneBotHolder.client
+        val client = FairyClientHolder.client
         tvStatus.text = when {
             client?.isConnected == true -> getString(R.string.status_connected)
             client != null -> getString(R.string.status_connecting)
@@ -197,7 +255,6 @@ class ChatFragment : Fragment() {
                 VoiceController.State.RECORDING -> R.string.voice_state_recording
                 VoiceController.State.RECOGNIZING -> R.string.voice_state_recognizing
                 VoiceController.State.WAITING_AI -> R.string.voice_state_waiting_ai
-                VoiceController.State.SPEAKING -> R.string.voice_state_speaking
             }
         )
     }
@@ -224,7 +281,8 @@ class ChatAdapter(private val items: List<ChatMessage>) :
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val m = items[position]
-        holder.bubble.text = m.text
+        // S3：流式进行中的 FAIRY 消息显示打字机光标
+        holder.bubble.text = if (!m.finalized && m.sender == ChatSender.FAIRY) m.text + "▌" else m.text
         if (m.sender == ChatSender.USER) {
             holder.root.gravity = Gravity.END
             holder.bubble.setBackgroundResource(R.drawable.bubble_user)

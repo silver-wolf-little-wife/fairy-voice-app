@@ -64,7 +64,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:hint="@string/label_self_id"
-            android:inputType="number"
+            android:inputType="text"
             android:textColor="@color/fairy_text"
             android:textColorHint="#80E1F5FE" />
 
@@ -74,7 +74,8 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:hint="@string/label_user_id"
-            android:inputType="number"
+            android:inputType="text"
+            android:visibility="gone"
             android:textColor="@color/fairy_text"
             android:textColorHint="#80E1F5FE" />
 

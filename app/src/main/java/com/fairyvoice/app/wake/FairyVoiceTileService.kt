@@ -11,7 +11,7 @@ package com.fairyvoice.app.wake
 
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import com.fairyvoice.app.OneBotHolder
+import com.fairyvoice.app.FairyClientHolder
 import com.fairyvoice.app.R
 import com.fairyvoice.app.audio.VoiceController
 
@@ -40,7 +40,7 @@ class FairyVoiceTileService : TileService() {
             when {
                 VoiceController.currentState == VoiceController.State.RECORDING ->
                     R.string.tile_subtitle_recording
-                OneBotHolder.client?.isConnected == true ->
+                FairyClientHolder.client?.isConnected == true ->
                     R.string.tile_subtitle_connected
                 else -> R.string.tile_subtitle_idle
             }
