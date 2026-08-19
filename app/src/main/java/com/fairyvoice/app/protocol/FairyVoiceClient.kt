@@ -49,13 +49,15 @@ class FairyVoiceClient(
     /**
      * 首 token 超时（对齐 CherryStudio IdleTimeoutController 的流式健壮性）。
      * 发送 ask 后，LLM 迟迟不吐第一个 token（未收 stream_begin/response）超过该时长 → 该请求失败。
+     * 60s：给 B 端工具调用/LLM 首 token 足够时间（网络搜索/远程设备操作可能 >30s）。
      */
-    private val firstTokenTimeoutMs: Long = 30_000,
+    private val firstTokenTimeoutMs: Long = 60_000,
     /**
      * 流式增量间空闲超时。已开始流式（收到 stream_begin）后，相邻 delta 间隔超过该时长
      * → 判定 B 端卡死/断流，以已收 delta 拼接 + 标记「已中断」收尾（已收内容完整可读）。
+     * 60s：B 端工具调用/LLM 长思考间隔可能远超 15s，避免误判断流。
      */
-    private val idleTimeoutMs: Long = 15_000,
+    private val idleTimeoutMs: Long = 60_000,
 ) {
     // 可选回调（均在客户端工作线程触发，调用方自行切线程）
     var onReady: (() -> Unit)? = null
@@ -411,9 +413,10 @@ class FairyVoiceClient(
         onStreamBegin?.invoke(frame.id, frame.recognized)
     }
 
-    /** 流增量：追加到聚合缓冲，重置空闲看门狗。 */
+    /** 流增量：追加到聚合缓冲，重置空闲看门狗。流已结束时忽略迟到的 delta。 */
     private fun handleStreamDelta(frame: StreamDeltaFrame) {
-        streaming[frame.id]?.append(frame.delta)
+        val sb = streaming[frame.id] ?: return // 请求已结束（idle 超时/断流），忽略迟到 delta
+        sb.append(frame.delta)
         resetIdleTimer(frame.id)
         onStreamDelta?.invoke(frame.id, frame.delta)
     }
@@ -421,24 +424,30 @@ class FairyVoiceClient(
     /** 流结束：ok=true 以 data.text 为准完成；ok=false 以已收 delta + 错误完成。 */
     private fun handleStreamEnd(frame: StreamEndFrame) {
         cancelIdleTimer(frame.id)
+        val fut = pending.remove(frame.id)
+        if (fut == null) {
+            // 请求已被 idle 超时/断流结束，迟到的 stream_end 忽略（防重复 onReply/UI 气泡）
+            streaming.remove(frame.id)
+            streamingRecognized.remove(frame.id)
+            return
+        }
         val sb = streaming.remove(frame.id)
         val recognized = streamingRecognized.remove(frame.id)
         val accumulated = sb?.toString()
-        val fut = pending.remove(frame.id)
         if (frame.ok) {
             // data.text 为完整回复，可修复丢帧；缺失时回退到 delta 拼接
             val full = frame.text ?: accumulated ?: ""
             // 先回调后 complete：保证阻塞返回时所有流式回调已执行完（调用方可直接读状态）
             onStreamEnd?.invoke(frame.id, true, full)
             onReply?.invoke(full)
-            if (fut != null && !fut.isDone) {
+            if (!fut.isDone) {
                 fut.complete(ResponseFrame(frame.id, true, full, recognized, null, null))
             }
         } else {
             val code = frame.errorCode ?: "llm_error"
             val msg = frame.errorMessage ?: "流式生成失败"
             onStreamEnd?.invoke(frame.id, false, accumulated)
-            if (fut != null && !fut.isDone) {
+            if (!fut.isDone) {
                 fut.completeExceptionally(FairyVoiceException.AskError(code, msg))
             }
         }
